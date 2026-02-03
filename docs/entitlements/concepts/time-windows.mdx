@@ -1,0 +1,198 @@
+---
+title: Time Windows
+description: Understanding calendar, sliding, and lifetime windows
+---
+
+# Time Windows
+
+Time windows define when quotas reset. Choosing the right window type affects both user experience and system behavior.
+
+## Window Types
+
+### Calendar Windows
+
+Reset at fixed calendar boundaries:
+
+```typescript
+import { windows } from '@courierkit/entitlements';
+
+windows.hourly   // Resets at :00 of each hour
+windows.daily    // Resets at midnight UTC
+windows.weekly   // Resets Monday at midnight UTC
+windows.monthly  // Resets 1st of month at midnight UTC
+windows.yearly   // Resets January 1st at midnight UTC
+```
+
+**Example: Monthly API limit**
+
+```
+User signs up January 15th
+
+January:
+├── Jan 1 ──── Jan 15 (signup) ──── Feb 1
+│              └── 1000 calls ─────┘
+
+February:
+├── Feb 1 ─────────────────────────── Mar 1
+│   └── 1000 calls (reset!) ────────┘
+```
+
+**Pros:**
+- Intuitive for users ("1000 calls per month")
+- Predictable reset times
+- Easy to explain in pricing pages
+
+**Cons:**
+- Users who sign up late in a period get less value
+- Reset timing can cause usage spikes
+
+### Sliding Windows
+
+Look back a fixed duration from the current moment:
+
+```typescript
+windows.rolling(24, 'hours')   // Last 24 hours
+windows.rolling(7, 'days')     // Last 7 days
+windows.rolling(4, 'weeks')    // Last 4 weeks
+```
+
+**Example: Rate limiting**
+
+```
+Current time: Jan 15, 3:00 PM
+
+24-hour rolling window:
+├── Jan 14, 3:00 PM ─────────────────── Jan 15, 3:00 PM (now)
+│   └── Count requests in this window ─┘
+
+One hour later (Jan 15, 4:00 PM):
+├── Jan 14, 4:00 PM ─────────────────── Jan 15, 4:00 PM (now)
+│   └── Window has shifted ────────────┘
+```
+
+**Pros:**
+- Fair regardless of when users start
+- No reset spikes
+- Natural rate limiting behavior
+
+**Cons:**
+- Harder to explain ("100 requests in any rolling 24-hour period")
+- Users can't predict exact reset time
+- More expensive to query (need timestamp-range queries)
+
+### Lifetime Windows
+
+No reset, ever:
+
+```typescript
+windows.lifetime
+```
+
+**Example: Free trial**
+
+```typescript
+const entitlements = {
+  'trial-exports': { limit: 5, window: windows.lifetime }
+};
+```
+
+**Use cases:**
+- Free trial limits
+- One-time onboarding actions
+- Promotional credits
+
+### No Window (Unlimited)
+
+```typescript
+const entitlements = {
+  'premium-feature': { limit: null, window: null }
+};
+```
+
+When `limit` is `null`, the action is unlimited and no usage tracking is needed.
+
+## Timezone Handling
+
+Calendar windows can be timezone-aware:
+
+```typescript
+// Resets at midnight in user's timezone
+const window = {
+  type: 'calendar',
+  unit: 'day',
+  timezone: 'America/New_York'
+};
+```
+
+Without a timezone, calendar windows use UTC. This matters for daily and hourly windows where "midnight" depends on perspective.
+
+## Querying Windows
+
+### Get Current Interval
+
+```typescript
+import { resolveWindow, windows } from '@courierkit/entitlements';
+
+const now = new Date('2024-01-15T15:30:00Z');
+const interval = resolveWindow(windows.monthly, now);
+// { start: 2024-01-01T00:00:00Z, end: 2024-02-01T00:00:00Z }
+```
+
+### Get Next Reset
+
+```typescript
+import { nextReset, windows } from '@courierkit/entitlements';
+
+const now = new Date('2024-01-15T15:30:00Z');
+
+nextReset(windows.daily, now);     // 2024-01-16T00:00:00Z
+nextReset(windows.monthly, now);   // 2024-02-01T00:00:00Z
+nextReset(windows.lifetime, now);  // null (never resets)
+```
+
+### Describe Window
+
+```typescript
+import { describeWindow, windows } from '@courierkit/entitlements';
+
+describeWindow(windows.monthly);           // "resets monthly"
+describeWindow(windows.rolling(24, 'hours')); // "24 hours rolling window"
+describeWindow(windows.lifetime);          // "lifetime"
+```
+
+## Choosing a Window Type
+
+| Use Case | Recommended Window | Why |
+|----------|-------------------|-----|
+| Subscription quotas | `monthly` | Matches billing cycle |
+| API rate limiting | `rolling(1, 'hours')` | Fair, prevents bursts |
+| Daily exports | `daily` | Simple, predictable |
+| Burst protection | `rolling(1, 'minutes')` | Prevents abuse |
+| Free trial | `lifetime` | One-time allocation |
+| Enterprise SLA | `monthly` | Matches contracts |
+
+## Implementation Notes
+
+### Calendar Window Boundaries
+
+Calendar windows are half-open intervals `[start, end)`:
+
+```typescript
+// Monthly window for January 2024
+{
+  start: new Date('2024-01-01T00:00:00Z'),  // Inclusive
+  end: new Date('2024-02-01T00:00:00Z')     // Exclusive
+}
+```
+
+An event at exactly `2024-02-01T00:00:00Z` belongs to February, not January.
+
+### Week Start
+
+Weekly windows start on Monday (ISO 8601):
+
+```typescript
+// If today is Wednesday Jan 17, 2024
+resolveWindow(windows.weekly, new Date('2024-01-17'));
+// { start: 2024-01-15 (Monday), end: 2024-01-22 (next Monday) }
+```

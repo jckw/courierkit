@@ -1,0 +1,231 @@
+---
+title: Quickstart
+description: Get up and running with entitlements in 5 minutes
+---
+
+# Quickstart
+
+This guide will walk you through setting up `@courierkit/entitlements` to check if users can perform actions based on their subscription plan.
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @courierkit/entitlements
+```
+
+```bash yarn
+yarn add @courierkit/entitlements
+```
+</CodeGroup>
+
+## Step 1: Define Your Adapter
+
+The adapter connects the entitlements engine to your data. You need to implement two methods:
+
+```typescript
+import { createEntitlements, windows, type Adapter } from '@courierkit/entitlements';
+
+const adapter: Adapter = {
+  // Return entitlements for an actor (user, team, org, etc.)
+  async getEntitlements(actorId: string) {
+    // This is where you query your database, Stripe, etc.
+    const user = await db.users.findById(actorId);
+    const plan = await db.plans.findById(user.planId);
+
+    // Map your data model to the entitlement shape
+    return {
+      'api-calls': {
+        limit: plan.apiCallsLimit,  // e.g., 1000 or null for unlimited
+        window: windows.monthly,     // When the limit resets
+      },
+      'exports': {
+        limit: plan.exportsPerDay,
+        window: windows.daily,
+      },
+      'team-members': {
+        limit: plan.maxTeamMembers,
+        window: null,  // Lifetime limit (doesn't reset)
+      },
+    };
+  },
+
+  // Return usage count for an action within a time interval
+  async getUsage(actorId: string, action: string, interval) {
+    return db.usage.count({
+      actorId,
+      action,
+      timestamp: {
+        gte: interval.start,
+        lt: interval.end,
+      },
+    });
+  },
+};
+```
+
+## Step 2: Create the Engine
+
+```typescript
+const entitlements = createEntitlements({ adapter });
+```
+
+## Step 3: Check Permissions
+
+### Basic Check
+
+```typescript
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+
+if (decision.outcome.allowed) {
+  // Perform the action
+  await performApiCall();
+
+  // Fulfill obligations (increment usage counter)
+  for (const obligation of decision.obligations) {
+    if (obligation.type === 'consume') {
+      await db.usage.create({
+        actorId: 'user-123',
+        action: 'api-calls',
+        amount: obligation.params.amount,
+        timestamp: new Date(),
+      });
+    }
+  }
+} else {
+  // Access denied - check reasons
+  console.log(decision.reasons[0].explanation);
+  // "Limit exceeded (1000/1000 used)"
+}
+```
+
+### Check Multiple Actions
+
+```typescript
+const caps = await entitlements.capabilities({
+  actorId: 'user-123',
+  actions: ['api-calls', 'exports', 'bulk-import'],
+});
+
+// caps.summary.available: ['api-calls']
+// caps.summary.exhausted: ['exports']
+// caps.summary.unavailable: ['bulk-import']
+
+// Show UI based on capabilities
+if (caps.actions['exports'].status === 'exhausted') {
+  showUpgradePrompt(caps.actions['exports'].availableAt);
+}
+```
+
+### Show Usage Dashboard
+
+```typescript
+const dash = await entitlements.dashboard({
+  actorId: 'user-123',
+});
+
+// Render quota cards
+for (const [action, quota] of Object.entries(dash.quotas)) {
+  console.log(`${quota.name}: ${quota.used}/${quota.limit ?? '∞'}`);
+  if (quota.resetsAt) {
+    console.log(`  Resets: ${quota.resetsAt.toLocaleDateString()}`);
+  }
+}
+```
+
+## Common Patterns
+
+### Checking Before an Action
+
+```typescript
+async function exportData(userId: string, data: any) {
+  const decision = await entitlements.check({
+    actorId: userId,
+    action: 'exports',
+  });
+
+  if (!decision.outcome.allowed) {
+    throw new QuotaExceededError(decision.reasons[0].explanation);
+  }
+
+  // Do the export
+  const result = await performExport(data);
+
+  // Record usage after success
+  await recordUsage(userId, 'exports', 1);
+
+  return result;
+}
+```
+
+### Consuming Multiple Units
+
+```typescript
+// Bulk operations that consume more than 1 unit
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+  consume: 100,  // Batch of 100 API calls
+});
+```
+
+### When Will It Be Available?
+
+```typescript
+const availability = await entitlements.availableAt({
+  actorId: 'user-123',
+  action: 'exports',
+});
+
+switch (availability.status) {
+  case 'now':
+    // Can export right now
+    break;
+  case 'at':
+    // Will be available at availability.at
+    showCountdown(availability.at);
+    break;
+  case 'never':
+    // Lifetime limit reached or not in plan
+    showUpgradePrompt();
+    break;
+}
+```
+
+## Time Windows
+
+The library includes presets for common reset patterns:
+
+```typescript
+import { windows } from '@courierkit/entitlements';
+
+// Calendar-based (reset at fixed points)
+windows.hourly   // Reset at the start of each hour
+windows.daily    // Reset at midnight UTC
+windows.weekly   // Reset on Monday at midnight
+windows.monthly  // Reset on the 1st at midnight
+windows.yearly   // Reset on Jan 1st
+
+// Rolling windows (sliding time window)
+windows.rolling(24, 'hours')  // Last 24 hours
+windows.rolling(7, 'days')    // Last 7 days
+windows.rolling(4, 'weeks')   // Last 4 weeks
+
+// No reset
+windows.lifetime  // Never resets
+null              // Unlimited (no tracking needed)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Mental Model" icon="brain" href="/entitlements/mental-model">
+    Understand the core concepts: facts, rules, obligations, and decisions.
+  </Card>
+  <Card title="Time Windows" icon="clock" href="/entitlements/concepts/time-windows">
+    Learn about calendar vs sliding windows and when to use each.
+  </Card>
+</CardGroup>

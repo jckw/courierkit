@@ -1,0 +1,203 @@
+---
+title: check
+description: Check if an actor can perform an action
+---
+
+# check
+
+Checks if an actor is allowed to perform an action, returning a full decision with reasoning and obligations.
+
+## Signature
+
+```typescript
+async function check(input: CheckInput): Promise<Decision<{ allowed: boolean }>>
+```
+
+## Parameters
+
+### input
+
+<ParamField path="actorId" type="string" required>
+  The identifier of the actor (user, team, organization, etc.)
+</ParamField>
+
+<ParamField path="action" type="string" required>
+  The action to check (must match a key in the entitlements returned by your adapter)
+</ParamField>
+
+<ParamField path="consume" type="number" default="1">
+  The amount to consume. Use this for batch operations that consume multiple units at once.
+</ParamField>
+
+## Returns
+
+A `Decision` object:
+
+```typescript
+interface Decision<T> {
+  outcome: T;                    // { allowed: boolean }
+  reasons: Reason[];             // What each rule concluded
+  obligations: Obligation[];     // What should happen next
+  trace: {
+    evaluatedAt: Date;          // When evaluated
+    durationMs: number;         // How long it took
+    facts: Record<string, any>; // Loaded facts (for debugging)
+  };
+}
+```
+
+## Example
+
+### Basic Check
+
+```typescript
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+
+if (decision.outcome.allowed) {
+  // Perform the action
+  await makeApiCall();
+
+  // Fulfill obligations
+  for (const obligation of decision.obligations) {
+    if (obligation.type === 'consume') {
+      await recordUsage('user-123', 'api-calls', obligation.params.amount);
+    }
+  }
+} else {
+  throw new QuotaExceededError(decision.reasons[0].explanation);
+}
+```
+
+### Batch Operations
+
+```typescript
+// Check if user can make 100 API calls at once
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+  consume: 100,
+});
+
+if (decision.outcome.allowed) {
+  await makeBatchApiCalls(100);
+  await recordUsage('user-123', 'api-calls', 100);
+}
+```
+
+### Using the Decision Trace
+
+```typescript
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+
+// Debug logging
+console.log('Decision:', decision.outcome.allowed ? 'ALLOWED' : 'DENIED');
+console.log('Evaluated at:', decision.trace.evaluatedAt);
+console.log('Duration:', decision.trace.durationMs, 'ms');
+console.log('Facts:', JSON.stringify(decision.trace.facts, null, 2));
+
+// Detailed reasoning
+for (const reason of decision.reasons) {
+  console.log(`Rule "${reason.rule}": ${reason.outcome} - ${reason.explanation}`);
+}
+```
+
+## Decision Outcomes
+
+### Allowed
+
+When the action is allowed:
+
+```typescript
+{
+  outcome: { allowed: true },
+  reasons: [{
+    rule: 'limit-check',
+    outcome: 'allow',
+    explanation: 'Action allowed (749 remaining)'
+  }],
+  obligations: [{
+    type: 'consume',
+    params: { amount: 1 }
+  }],
+  trace: { ... }
+}
+```
+
+### Denied - Limit Exceeded
+
+When the limit is reached:
+
+```typescript
+{
+  outcome: { allowed: false },
+  reasons: [{
+    rule: 'limit-check',
+    outcome: 'deny',
+    explanation: 'Limit exceeded (1000/1000 used)'
+  }],
+  obligations: [],
+  trace: { ... }
+}
+```
+
+### Denied - No Entitlement
+
+When no entitlement exists for the action:
+
+```typescript
+{
+  outcome: { allowed: false },
+  reasons: [{
+    rule: 'entitlement-exists',
+    outcome: 'deny',
+    explanation: 'No entitlement defined for action: bulk-import'
+  }],
+  obligations: [],
+  trace: { ... }
+}
+```
+
+## Handling Obligations
+
+Obligations are returned with allow decisions to tell you what should happen:
+
+```typescript
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+
+if (decision.outcome.allowed) {
+  try {
+    await performAction();
+
+    // Only fulfill obligations after successful action
+    for (const obligation of decision.obligations) {
+      switch (obligation.type) {
+        case 'consume':
+          await db.usage.create({
+            actorId: 'user-123',
+            action: 'api-calls',
+            amount: obligation.params.amount,
+            timestamp: new Date(),
+          });
+          break;
+      }
+    }
+  } catch (error) {
+    // Action failed - don't record usage
+    throw error;
+  }
+}
+```
+
+## See Also
+
+- [capabilities](/entitlements/api-reference/capabilities) - Check multiple actions at once
+- [availableAt](/entitlements/api-reference/available-at) - Get when an action will be available

@@ -1,6 +1,6 @@
 {
   "$schema": "https://mintlify.com/schema.json",
-  "name": "@courierkit/availability",
+  "name": "CourierKit",
   "logo": {
     "dark": "/logo/dark.svg",
     "light": "/logo/light.svg"
@@ -18,69 +18,102 @@
   "topbarLinks": [
     {
       "name": "GitHub",
-      "url": "https://github.com/jckw/courierkit-availability"
+      "url": "https://github.com/jckw/courierkit"
     }
   ],
   "topbarCtaButton": {
     "name": "Get Started",
-    "url": "/quickstart"
+    "url": "/introduction"
   },
   "tabs": [
     {
-      "name": "API Reference",
-      "url": "api-reference"
+      "name": "Availability",
+      "url": "availability"
+    },
+    {
+      "name": "Entitlements",
+      "url": "entitlements"
     }
   ],
   "anchors": [
     {
       "name": "GitHub",
       "icon": "github",
-      "url": "https://github.com/jckw/courierkit-availability"
+      "url": "https://github.com/jckw/courierkit"
     }
   ],
   "navigation": [
     {
+      "group": "Overview",
+      "pages": ["introduction"]
+    },
+    {
       "group": "Getting Started",
-      "pages": ["introduction", "quickstart", "mental-model"]
+      "pages": [
+        "availability/introduction",
+        "availability/quickstart",
+        "availability/mental-model"
+      ]
     },
     {
       "group": "Core Concepts",
       "pages": [
-        "concepts/schedules",
-        "concepts/event-types",
-        "concepts/bookings-and-blocks",
-        "concepts/intervals"
+        "availability/concepts/schedules",
+        "availability/concepts/event-types",
+        "availability/concepts/bookings-and-blocks",
+        "availability/concepts/intervals"
       ]
     },
     {
       "group": "Examples",
       "pages": [
-        "examples/healthcare-clinic",
-        "examples/multi-host-booking",
-        "examples/google-calendar-integration"
+        "availability/examples/healthcare-clinic",
+        "availability/examples/multi-host-booking",
+        "availability/examples/google-calendar-integration"
       ]
     },
     {
       "group": "API Reference",
       "pages": [
-        "api-reference/get-available-slots",
-        "api-reference/expand-schedule",
-        "api-reference/expand-recurrence",
-        "api-reference/build-blocks-from-freebusy",
-        "api-reference/interval-functions"
+        "availability/api-reference/get-available-slots",
+        "availability/api-reference/expand-schedule",
+        "availability/api-reference/expand-recurrence",
+        "availability/api-reference/build-blocks-from-freebusy",
+        "availability/api-reference/interval-functions"
       ]
     },
     {
       "group": "Types",
       "pages": [
-        "api-reference/types/schedule",
-        "api-reference/types/event-type",
-        "api-reference/types/booking",
-        "api-reference/types/slot"
+        "availability/api-reference/types/schedule",
+        "availability/api-reference/types/event-type",
+        "availability/api-reference/types/booking",
+        "availability/api-reference/types/slot"
+      ]
+    },
+    {
+      "group": "Getting Started",
+      "pages": [
+        "entitlements/introduction",
+        "entitlements/quickstart",
+        "entitlements/mental-model"
+      ]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "entitlements/concepts/time-windows"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "entitlements/api-reference/create-entitlements",
+        "entitlements/api-reference/check"
       ]
     }
   ],
   "footerSocials": {
-    "github": "https://github.com/jckw/courierkit-availability"
+    "github": "https://github.com/jckw/courierkit"
   }
 }

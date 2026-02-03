@@ -17,12 +17,17 @@ const RAW_RUNTIME_STATE =
     {\
       "name": "@courierkit/availability",\
       "reference": "workspace:packages/availability"\
+    },\
+    {\
+      "name": "@courierkit/entitlements",\
+      "reference": "workspace:packages/entitlements"\
     }\
   ],\
   "enableTopLevelFallback": true,\
   "ignorePatternData": "(^(?:\\\\.yarn\\\\/sdks(?:\\\\/(?!\\\\.{1,2}(?:\\\\/|$))(?:(?:(?!(?:^|\\\\/)\\\\.{1,2}(?:\\\\/|$)).)*?)|$))$)",\
   "fallbackExclusionList": [\
     ["@courierkit/availability", ["workspace:packages/availability"]],\
+    ["@courierkit/entitlements", ["workspace:packages/entitlements"]],\
     ["courierkit", ["workspace:."]]\
   ],\
   "fallbackPool": [\
@@ -134,6 +139,18 @@ const RAW_RUNTIME_STATE =
         "packageLocation": "./packages/availability/",\
         "packageDependencies": [\
           ["@courierkit/availability", "workspace:packages/availability"],\
+          ["bun-types", "npm:1.3.8"],\
+          ["date-fns", "npm:4.1.0"],\
+          ["date-fns-tz", "virtual:0791b7d63c76abff2ae74e62942f57bad39e72de7c34090b97258146f10d3f848f5bee6321c341c835cdbb3c6f8d009758611b55d8bedeb87db438ad191d8428#npm:3.2.0"]\
+        ],\
+        "linkType": "SOFT"\
+      }]\
+    ]],\
+    ["@courierkit/entitlements", [\
+      ["workspace:packages/entitlements", {\
+        "packageLocation": "./packages/entitlements/",\
+        "packageDependencies": [\
+          ["@courierkit/entitlements", "workspace:packages/entitlements"],\
           ["bun-types", "npm:1.3.8"],\
           ["date-fns", "npm:4.1.0"],\
           ["date-fns-tz", "virtual:0791b7d63c76abff2ae74e62942f57bad39e72de7c34090b97258146f10d3f848f5bee6321c341c835cdbb3c6f8d009758611b55d8bedeb87db438ad191d8428#npm:3.2.0"]\

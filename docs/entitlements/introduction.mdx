@@ -1,0 +1,109 @@
+---
+title: Introduction
+description: A stateless, composable policy decision library for TypeScript
+---
+
+# @courierkit/entitlements
+
+A stateless, composable policy decision library for TypeScript. Given facts about actors, resources, and constraints, it answers the question: **"Is this allowed, and why?"**
+
+## Why This Library?
+
+Building an entitlement system means answering deceptively complex questions:
+
+- Can this user perform this action given their subscription tier?
+- How many API calls do they have left this month?
+- When will their quota reset?
+- What's the full explanation for why something was denied?
+
+This library handles all of that while staying completely stateless. You bring the data, we compute the decision.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Stateless" icon="database">
+    No side effects, no caching, no persistence. You own your data—the engine just computes.
+  </Card>
+  <Card title="Explainable" icon="magnifying-glass">
+    Every decision includes the full chain of reasoning. No black boxes.
+  </Card>
+  <Card title="Obligations" icon="list-check">
+    The engine tells you what should happen (decrement quota); you decide how to do it.
+  </Card>
+  <Card title="Type-Safe" icon="shield-check">
+    Full TypeScript support with comprehensive type definitions.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Everything is a decision over facts. The engine layers evaluations to produce a structured outcome:
+
+```
+Facts (loaded from your data)        { user, plan, usage, overrides }
+→ Rules (pure predicates)            has-feature? within-limit? not-suspended?
+→ Results (per-rule)                 allow | deny | skip, with explanation
+→ Decision (resolved)                { outcome, reasons[], obligations[] }
+```
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @courierkit/entitlements
+```
+
+```bash yarn
+yarn add @courierkit/entitlements
+```
+
+```bash pnpm
+pnpm add @courierkit/entitlements
+```
+
+```bash bun
+bun add @courierkit/entitlements
+```
+</CodeGroup>
+
+## Quick Example
+
+```typescript
+import { createEntitlements, windows } from '@courierkit/entitlements';
+
+const entitlements = createEntitlements({
+  adapter: {
+    async getEntitlements(actorId) {
+      // Load from your database, Stripe, etc.
+      return {
+        'api-calls': { limit: 1000, window: windows.monthly },
+        'exports': { limit: 10, window: windows.daily },
+        'premium-features': { limit: null, window: null }, // unlimited
+      };
+    },
+    async getUsage(actorId, action, interval) {
+      // Query your usage/events table
+      return db.countUsage(actorId, action, interval);
+    },
+  },
+});
+
+// Check if an action is allowed
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+
+if (decision.outcome.allowed) {
+  // Perform the action, then fulfill obligations
+  for (const obligation of decision.obligations) {
+    if (obligation.type === 'consume') {
+      await db.incrementUsage(actorId, action, obligation.params.amount);
+    }
+  }
+}
+```
+
+<Card title="Ready to dive in?" icon="rocket" href="/entitlements/quickstart">
+  Follow our quickstart guide to set up entitlements in your application.
+</Card>

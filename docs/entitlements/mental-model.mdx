@@ -1,0 +1,248 @@
+---
+title: Mental Model
+description: Understanding how the entitlements engine thinks
+---
+
+# Mental Model
+
+The entitlements engine is built around a simple idea: **every decision is a computation over facts**. Understanding this model helps you use the library effectively and extend it for complex use cases.
+
+## The Decision Pipeline
+
+When you call `check()`, here's what happens:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  INPUT                                                          │
+│  { actorId: 'user-123', action: 'api-calls', consume: 1 }      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  FACT LOADING                                                   │
+│  Load entitlements → Load usage (depends on entitlement window) │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  RULE EVALUATION                                                │
+│  Rule: "limit-check"                                            │
+│  Facts: { limit: 1000, used: 950 }                             │
+│  Result: allow("Action allowed, 49 remaining")                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  RESOLUTION                                                     │
+│  Combine rule results → { allowed: true }                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  DECISION                                                       │
+│  {                                                              │
+│    outcome: { allowed: true },                                  │
+│    reasons: [{ rule: 'limit-check', outcome: 'allow', ... }],  │
+│    obligations: [{ type: 'consume', params: { amount: 1 } }],  │
+│    trace: { evaluatedAt, durationMs, facts }                   │
+│  }                                                              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Core Concepts
+
+### Facts
+
+Facts are the raw data that rules evaluate against. The engine doesn't care where facts come from—you load them via your adapter.
+
+```typescript
+// Facts might include:
+{
+  entitlements: {
+    'api-calls': { limit: 1000, window: { type: 'calendar', unit: 'month' } }
+  },
+  usage: {
+    'api-calls': 950  // Current count in the window
+  }
+}
+```
+
+Facts can depend on other facts. For example, you can't load usage until you know the entitlement's window (to query the right time range).
+
+### Rules
+
+A rule is a pure function that examines facts and returns one of three outcomes:
+
+- **allow** — The rule passes. May include obligations.
+- **deny** — The rule fails. Includes an explanation.
+- **skip** — The rule doesn't apply to this input.
+
+```typescript
+// Conceptually, the limit-check rule does this:
+function evaluateLimitCheck(facts, input) {
+  const { limit, used } = facts;
+  const consume = input.consume ?? 1;
+
+  if (limit === null) {
+    return allow('Unlimited');
+  }
+
+  if (used + consume > limit) {
+    return deny(`Limit exceeded (${used}/${limit} used)`);
+  }
+
+  return allow(`${limit - used - consume} remaining`, [
+    { type: 'consume', params: { amount: consume } }
+  ]);
+}
+```
+
+### Obligations
+
+Obligations are **declarative instructions** attached to allow results. The engine tells you what *should* happen, but doesn't do it.
+
+Common obligation types:
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `consume` | Decrement a quota | `{ amount: 1 }` |
+| `log` | Audit trail | `{ event: 'feature-used', feature: 'export' }` |
+| `notify` | Trigger alerts | `{ channel: 'slack', threshold: '90%' }` |
+
+**Why obligations instead of side effects?**
+
+1. **Testability** — Pure functions are easy to test
+2. **Flexibility** — You decide *how* to fulfill obligations
+3. **Atomicity** — You can batch obligations or skip them on failure
+4. **Auditability** — Obligations are visible in the decision trace
+
+### Decisions
+
+A decision packages everything together:
+
+```typescript
+interface Decision {
+  outcome: { allowed: boolean };   // The final answer
+  reasons: Reason[];               // What each rule concluded
+  obligations: Obligation[];       // What should happen next
+  trace: {
+    evaluatedAt: Date;            // When this was computed
+    durationMs: number;           // How long it took
+    facts: Record<string, any>;   // Snapshot for debugging
+  };
+}
+```
+
+The trace is invaluable for debugging. When something is denied unexpectedly, you can see exactly what facts were loaded and how each rule evaluated them.
+
+## Time Windows
+
+Understanding time windows is crucial for quota systems.
+
+### Calendar Windows
+
+Reset at fixed points in time:
+
+```
+Monthly window (evaluated Jan 15):
+├── Jan 1 ─────────────────────── Feb 1 ──────────────────────── Mar 1
+│   └── Current window ──────────┘
+│       Usage counted here
+```
+
+Calendar windows are intuitive for users: "You have 1000 API calls per month."
+
+### Sliding Windows
+
+Look back a fixed duration from now:
+
+```
+24-hour rolling window (evaluated Jan 15 at 3pm):
+├── Jan 14 3pm ─────────────────── Jan 15 3pm
+│   └── Current window ───────────┘
+│       Usage counted here
+```
+
+Sliding windows are fairer but harder to explain: "You can make 100 requests in any 24-hour period."
+
+### Lifetime Windows
+
+No reset, ever:
+
+```
+Lifetime window:
+├── Account created ──────────────────────────────────────────── Forever
+│   └── Current window ───────────────────────────────────────────┘
+│       All usage counted
+```
+
+Use for one-time actions: "Free trial: 3 exports total."
+
+## The Adapter Pattern
+
+The engine is completely decoupled from your data model through the adapter:
+
+```typescript
+interface Adapter {
+  getEntitlements(actorId: string): Promise<Record<string, Entitlement>>;
+  getUsage(actorId: string, action: string, interval: Interval): Promise<number>;
+}
+```
+
+This means:
+
+1. **Any data source** — Database, Stripe, feature flags, hardcoded rules
+2. **Any schema** — Map your models to the standard shape
+3. **Any caching strategy** — Add caching in your adapter if needed
+4. **Easy testing** — Swap in a mock adapter for tests
+
+## Composability
+
+For advanced use cases, you can build custom policies with the low-level API:
+
+```typescript
+import { createPolicy, createRule, evaluate, allow, deny } from '@courierkit/entitlements';
+
+const policy = createPolicy({
+  facts: {
+    user: {
+      name: 'user',
+      load: (input) => db.getUser(input.userId)
+    },
+    subscription: {
+      name: 'subscription',
+      depends: ['user'],
+      load: (_, facts) => stripe.getSubscription(facts.user.stripeId)
+    },
+  },
+  rules: [
+    createRule({
+      id: 'active-subscription',
+      description: 'Must have active subscription',
+      evaluate: (facts) =>
+        facts.subscription.status === 'active'
+          ? allow('Subscription active')
+          : deny('Subscription not active'),
+    }),
+    createRule({
+      id: 'feature-in-plan',
+      description: 'Feature must be in plan',
+      evaluate: (facts, input) =>
+        facts.subscription.features.includes(input.feature)
+          ? allow('Feature enabled')
+          : deny('Feature not in plan'),
+    }),
+  ],
+  resolve: (results) => ({
+    allowed: !results.some(r => r.outcome === 'deny'),
+  }),
+});
+
+const decision = await evaluate(policy, { userId: '123', feature: 'export' });
+```
+
+This gives you:
+
+- **Custom fact dependencies** — Load data in the right order
+- **Multiple rules** — Combine different checks
+- **Custom resolution** — Define what "allowed" means for your use case

@@ -1,84 +1,53 @@
 ---
 title: Introduction
-description: A stateless, composable slot generation library for Node.js
+description: Stateless, composable libraries for scheduling and entitlement systems
 ---
 
-# @courierkit/availability
+# CourierKit
 
-A stateless, composable slot generation library for Node.js. Given schedules, bookings, external calendar events, and event type configuration, it answers the question: **"When can this happen?"**
+A collection of stateless, composable libraries for building scheduling and entitlement systems in TypeScript.
 
-## Why This Library?
+## Packages
 
-Building a booking system means wrestling with surprisingly complex questions:
+<CardGroup cols={2}>
+  <Card title="@courierkit/availability" icon="calendar" href="/availability/introduction">
+    Slot generation for booking systems. Given schedules, bookings, and constraints, it answers: **"When can this happen?"**
+  </Card>
+  <Card title="@courierkit/entitlements" icon="shield-check" href="/entitlements/introduction">
+    Policy decisions for quota and access control. Given facts about actors and resources, it answers: **"Is this allowed, and why?"**
+  </Card>
+</CardGroup>
 
-- What times is someone actually available, considering their weekly schedule, holidays, and time off?
-- How do existing appointments—with buffer time for prep and wrap-up—affect remaining availability?
-- How do you enforce limits like "max 4 consultations per day" or "minimum 24 hours notice"?
-- What happens when you need to check availability across multiple people?
+## Philosophy
 
-This library handles all of that in a single, stateless function call. You bring the data, we compute the slots.
-
-## Key Features
+Both libraries share core design principles:
 
 <CardGroup cols={2}>
   <Card title="Stateless" icon="database">
     No side effects, no caching, no persistence. You own your data—the engine just computes.
   </Card>
-  <Card title="Timezone-Aware" icon="globe">
-    Schedules are defined in local time (because "9am–5pm Eastern" is natural). Everything else is UTC.
-  </Card>
   <Card title="Composable" icon="puzzle-piece">
-    Low-level interval arithmetic is exposed so you can build custom logic on top.
+    Low-level primitives are exposed so you can build custom logic on top.
   </Card>
-  <Card title="Type-Safe" icon="shield-check">
-    Full TypeScript support with comprehensive type definitions.
+  <Card title="Explainable" icon="magnifying-glass">
+    Full visibility into how decisions are made. No black boxes.
+  </Card>
+  <Card title="Type-Safe" icon="code">
+    Comprehensive TypeScript definitions with full inference support.
   </Card>
 </CardGroup>
 
-## How It Works
+## Quick Examples
 
-Everything is an interval on a timeline. The engine layers intervals on top of each other:
+### Availability
 
-```
-Availability (schedule)          ████████████████████████████
-− Bookings                          ████       ████
-− External calendar blocks               ███
-− Buffer zones (derived)            ▒█████▒    ▒████▒
-− Minimum notice window          ███
-= Available slots                         ░░░░        ░░░░░░░
-```
-
-## Installation
-
-<CodeGroup>
-```bash npm
-npm install @courierkit/availability
-```
-
-```bash yarn
-yarn add @courierkit/availability
-```
-
-```bash pnpm
-pnpm add @courierkit/availability
-```
-
-```bash bun
-bun add @courierkit/availability
-```
-</CodeGroup>
-
-## Quick Example
+Find available time slots for a booking:
 
 ```typescript
 import { getAvailableSlots } from '@courierkit/availability';
 
 const slots = getAvailableSlots({
-  eventType: {
-    id: 'consultation',
-    length: 60 * 60 * 1000, // 1 hour
-    minimumNotice: 24 * 60 * 60 * 1000, // 24 hours
-  },
+  eventType: { id: 'consultation', length: 60 * 60 * 1000 },
   hosts: [{
     hostId: 'dr-smith',
     schedules: {
@@ -94,15 +63,56 @@ const slots = getAvailableSlots({
     },
   }],
   bookings: [],
-  range: {
-    start: new Date('2024-01-15T00:00:00Z'),
-    end: new Date('2024-01-22T00:00:00Z'),
+  range: { start: new Date('2024-01-15'), end: new Date('2024-01-22') },
+});
+```
+
+### Entitlements
+
+Check if an action is allowed:
+
+```typescript
+import { createEntitlements, windows } from '@courierkit/entitlements';
+
+const entitlements = createEntitlements({
+  adapter: {
+    async getEntitlements(actorId) {
+      return {
+        'api-calls': { limit: 1000, window: windows.monthly },
+      };
+    },
+    async getUsage(actorId, action, interval) {
+      return db.countUsage(actorId, action, interval);
+    },
   },
 });
 
-// Returns: Array of { hostId, start, end } slots
+const decision = await entitlements.check({
+  actorId: 'user-123',
+  action: 'api-calls',
+});
+// decision.outcome.allowed: boolean
+// decision.obligations: [{ type: 'consume', params: { amount: 1 } }]
 ```
 
-<Card title="Ready to dive in?" icon="rocket" href="/quickstart">
-  Follow our quickstart guide to build your first booking page in minutes.
-</Card>
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @courierkit/availability @courierkit/entitlements
+```
+
+```bash yarn
+yarn add @courierkit/availability @courierkit/entitlements
+```
+
+```bash pnpm
+pnpm add @courierkit/availability @courierkit/entitlements
+```
+
+```bash bun
+bun add @courierkit/availability @courierkit/entitlements
+```
+</CodeGroup>
+
+Or install packages individually as needed.

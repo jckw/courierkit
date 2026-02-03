@@ -1,0 +1,147 @@
+---
+title: createEntitlements
+description: Create an entitlements engine with an adapter
+---
+
+# createEntitlements
+
+Creates an entitlements engine configured with your data adapter.
+
+## Signature
+
+```typescript
+function createEntitlements(options: EntitlementsOptions): EntitlementsEngine
+```
+
+## Parameters
+
+### options
+
+<ParamField path="adapter" type="Adapter" required>
+  The adapter that connects the engine to your data sources.
+
+  ```typescript
+  interface Adapter {
+    getEntitlements(actorId: string): Promise<Record<string, Entitlement>>;
+    getUsage(actorId: string, action: string, interval: Interval): Promise<number>;
+  }
+  ```
+</ParamField>
+
+## Returns
+
+An `EntitlementsEngine` with the following methods:
+
+| Method | Description |
+|--------|-------------|
+| `check(input)` | Check if an action is allowed |
+| `capabilities(input)` | Get capabilities for multiple actions |
+| `availableAt(input)` | Get when an action will be available |
+| `remainingUses(input)` | Get remaining uses for an action |
+| `dashboard(input)` | Get all quota states for an actor |
+
+## Example
+
+```typescript
+import { createEntitlements, windows } from '@courierkit/entitlements';
+
+const entitlements = createEntitlements({
+  adapter: {
+    async getEntitlements(actorId) {
+      const user = await db.users.findById(actorId);
+      const plan = await db.plans.findById(user.planId);
+
+      return {
+        'api-calls': {
+          limit: plan.apiCallsLimit,
+          window: windows.monthly,
+        },
+        'exports': {
+          limit: plan.exportsPerDay,
+          window: windows.daily,
+        },
+      };
+    },
+
+    async getUsage(actorId, action, interval) {
+      return db.usage.count({
+        actorId,
+        action,
+        timestamp: { gte: interval.start, lt: interval.end },
+      });
+    },
+  },
+});
+```
+
+## Adapter Interface
+
+### getEntitlements
+
+Returns a map of action names to entitlement configurations.
+
+```typescript
+async getEntitlements(actorId: string): Promise<Record<string, Entitlement>>
+```
+
+Each `Entitlement` has:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `limit` | `number \| null` | Maximum allowed uses (`null` = unlimited) |
+| `window` | `WindowSpec \| null` | When the limit resets (`null` = lifetime or unlimited) |
+
+### getUsage
+
+Returns the count of times an action was performed within an interval.
+
+```typescript
+async getUsage(
+  actorId: string,
+  action: string,
+  interval: Interval
+): Promise<number>
+```
+
+The `interval` is a half-open range `[start, end)` that you should use to query your usage data.
+
+## Mapping Your Data Model
+
+The adapter is where you map your existing data model to the entitlement shape:
+
+```typescript
+// From Stripe subscription
+async getEntitlements(actorId) {
+  const subscription = await stripe.subscriptions.retrieve(
+    await getStripeCustomerId(actorId)
+  );
+
+  const planLimits = PLAN_LIMITS[subscription.items.data[0].price.id];
+
+  return {
+    'api-calls': {
+      limit: planLimits.apiCalls,
+      window: windows.monthly,
+    },
+  };
+}
+```
+
+```typescript
+// From feature flags
+async getEntitlements(actorId) {
+  const flags = await launchDarkly.allFlagsState(actorId);
+
+  return {
+    'beta-feature': {
+      limit: flags.getValue('beta-feature-enabled') ? null : 0,
+      window: null,
+    },
+  };
+}
+```
+
+## See Also
+
+- [check](/entitlements/api-reference/check) - Check if an action is allowed
+- [capabilities](/entitlements/api-reference/capabilities) - Get capabilities for multiple actions
