@@ -35,6 +35,7 @@ const entitlements = createEntitlements({
 const decision = await entitlements.check({
   actorId: 'user-123',
   action: 'api-calls',
+  at: new Date(), // optional override for "now"
 });
 
 if (decision.outcome.allowed) {
@@ -130,6 +131,8 @@ Obligations are declarative instructions returned with allow decisions:
 The engine doesn't execute obligations—you decide how to fulfill them.
 
 ## High-Level Queries
+
+All engine methods accept an optional `at: Date` override to control evaluation time.
 
 ### check
 
@@ -291,6 +294,16 @@ interface Adapter {
 **getEntitlements** returns a map from action names to entitlement config. Query your schema (plans, features, bundles) and return this shape.
 
 **getUsage** returns the count of times the action was performed within the interval. Query your usage/events table.
+
+## Database Setup
+
+At minimum, you'll want:
+
+- A table/collection for plans or entitlements (action, limit, window)
+- A mapping from actors to plans (subscriptions)
+- A usage/events table with timestamps and counts
+
+For a concrete schema and query patterns, see the data model guide in the docs.
 
 ## Documentation
 

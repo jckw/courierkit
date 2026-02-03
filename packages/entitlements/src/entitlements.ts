@@ -49,6 +49,8 @@ export interface CheckInput {
 	actorId: string;
 	action: string;
 	consume?: number;
+	/** Override for the current time (useful for tests) */
+	at?: Date;
 }
 
 /**
@@ -57,6 +59,8 @@ export interface CheckInput {
 export interface CapabilitiesInput {
 	actorId: string;
 	actions: string[];
+	/** Override for the current time (useful for tests) */
+	at?: Date;
 }
 
 /**
@@ -65,6 +69,8 @@ export interface CapabilitiesInput {
 export interface AvailableAtInput {
 	actorId: string;
 	action: string;
+	/** Override for the current time (useful for tests) */
+	at?: Date;
 }
 
 /**
@@ -73,6 +79,8 @@ export interface AvailableAtInput {
 export interface RemainingUsesInput {
 	actorId: string;
 	action: string;
+	/** Override for the current time (useful for tests) */
+	at?: Date;
 }
 
 /**
@@ -80,6 +88,8 @@ export interface RemainingUsesInput {
  */
 export interface DashboardInput {
 	actorId: string;
+	/** Override for the current time (useful for tests) */
+	at?: Date;
 }
 
 /**
@@ -92,7 +102,8 @@ export function createEntitlements(options: EntitlementsOptions) {
 	 * Check if an actor can perform an action.
 	 */
 	async function check(input: CheckInput): Promise<Decision<{ allowed: boolean }>> {
-		const { actorId, action, consume = 1 } = input;
+		const { actorId, action, consume = 1, at } = input;
+		const evaluatedAt = at ?? new Date();
 
 		// Load entitlements
 		const entitlements = await adapter.getEntitlements(actorId);
@@ -111,7 +122,7 @@ export function createEntitlements(options: EntitlementsOptions) {
 				],
 				obligations: [],
 				trace: {
-					evaluatedAt: new Date(),
+					evaluatedAt,
 					durationMs: 0,
 					facts: { entitlements },
 				},
@@ -121,11 +132,11 @@ export function createEntitlements(options: EntitlementsOptions) {
 		// Load usage if there's a limit
 		let used = 0;
 		if (entitlement.limit !== null && entitlement.window) {
-			const interval = resolveWindow(entitlement.window);
+			const interval = resolveWindow(entitlement.window, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		} else if (entitlement.limit !== null) {
 			// Lifetime limit - get all-time usage
-			const interval = resolveWindow({ type: 'lifetime' });
+			const interval = resolveWindow({ type: 'lifetime' }, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		}
 
@@ -151,7 +162,7 @@ export function createEntitlements(options: EntitlementsOptions) {
 			],
 			obligations,
 			trace: {
-				evaluatedAt: new Date(),
+				evaluatedAt,
 				durationMs: 0,
 				facts: { entitlements, usage: { [action]: used } },
 			},
@@ -162,7 +173,8 @@ export function createEntitlements(options: EntitlementsOptions) {
 	 * Get capabilities for multiple actions.
 	 */
 	async function capabilities(input: CapabilitiesInput): Promise<Capabilities> {
-		const { actorId, actions } = input;
+		const { actorId, actions, at } = input;
+		const evaluatedAt = at ?? new Date();
 
 		// Load entitlements once
 		const entitlements = await adapter.getEntitlements(actorId);
@@ -190,15 +202,15 @@ export function createEntitlements(options: EntitlementsOptions) {
 			let used = 0;
 			let interval = null;
 			if (entitlement.limit !== null && entitlement.window) {
-				interval = resolveWindow(entitlement.window);
+				interval = resolveWindow(entitlement.window, evaluatedAt);
 				used = await adapter.getUsage(actorId, action, interval);
 			} else if (entitlement.limit !== null) {
-				interval = resolveWindow({ type: 'lifetime' });
+				interval = resolveWindow({ type: 'lifetime' }, evaluatedAt);
 				used = await adapter.getUsage(actorId, action, interval);
 			}
 
 			const remaining = remainingQuota(entitlement.limit, used);
-			const resetsAt = entitlement.window ? nextReset(entitlement.window) : null;
+			const resetsAt = entitlement.window ? nextReset(entitlement.window, evaluatedAt) : null;
 
 			const quotaState: QuotaState = {
 				name: action,
@@ -216,6 +228,7 @@ export function createEntitlements(options: EntitlementsOptions) {
 					limit: entitlement.limit,
 					used,
 					window: entitlement.window,
+					at: evaluatedAt,
 				});
 
 				result[action] = {
@@ -249,7 +262,8 @@ export function createEntitlements(options: EntitlementsOptions) {
 	 * Get when an action will become available again.
 	 */
 	async function availableAt(input: AvailableAtInput): Promise<Availability> {
-		const { actorId, action } = input;
+		const { actorId, action, at } = input;
+		const evaluatedAt = at ?? new Date();
 
 		// Load entitlements
 		const entitlements = await adapter.getEntitlements(actorId);
@@ -265,10 +279,10 @@ export function createEntitlements(options: EntitlementsOptions) {
 		// Load usage
 		let used = 0;
 		if (entitlement.limit !== null && entitlement.window) {
-			const interval = resolveWindow(entitlement.window);
+			const interval = resolveWindow(entitlement.window, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		} else if (entitlement.limit !== null) {
-			const interval = resolveWindow({ type: 'lifetime' });
+			const interval = resolveWindow({ type: 'lifetime' }, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		}
 
@@ -276,6 +290,7 @@ export function createEntitlements(options: EntitlementsOptions) {
 			limit: entitlement.limit,
 			used,
 			window: entitlement.window,
+			at: evaluatedAt,
 		});
 	}
 
@@ -283,7 +298,8 @@ export function createEntitlements(options: EntitlementsOptions) {
 	 * Get remaining uses for an action.
 	 */
 	async function remainingUses(input: RemainingUsesInput): Promise<RemainingUses> {
-		const { actorId, action } = input;
+		const { actorId, action, at } = input;
+		const evaluatedAt = at ?? new Date();
 
 		// Load entitlements
 		const entitlements = await adapter.getEntitlements(actorId);
@@ -307,10 +323,10 @@ export function createEntitlements(options: EntitlementsOptions) {
 		// Load usage
 		let used = 0;
 		if (entitlement.window) {
-			const interval = resolveWindow(entitlement.window);
+			const interval = resolveWindow(entitlement.window, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		} else {
-			const interval = resolveWindow({ type: 'lifetime' });
+			const interval = resolveWindow({ type: 'lifetime' }, evaluatedAt);
 			used = await adapter.getUsage(actorId, action, interval);
 		}
 
@@ -324,7 +340,8 @@ export function createEntitlements(options: EntitlementsOptions) {
 	 * Get dashboard showing all quota states for an actor.
 	 */
 	async function dashboard(input: DashboardInput): Promise<Dashboard> {
-		const { actorId } = input;
+		const { actorId, at } = input;
+		const evaluatedAt = at ?? new Date();
 
 		// Load entitlements
 		const entitlements = await adapter.getEntitlements(actorId);
@@ -336,15 +353,15 @@ export function createEntitlements(options: EntitlementsOptions) {
 			let used = 0;
 			let interval = null;
 			if (entitlement.limit !== null && entitlement.window) {
-				interval = resolveWindow(entitlement.window);
+				interval = resolveWindow(entitlement.window, evaluatedAt);
 				used = await adapter.getUsage(actorId, action, interval);
 			} else if (entitlement.limit !== null) {
-				interval = resolveWindow({ type: 'lifetime' });
+				interval = resolveWindow({ type: 'lifetime' }, evaluatedAt);
 				used = await adapter.getUsage(actorId, action, interval);
 			}
 
 			const remaining = remainingQuota(entitlement.limit, used);
-			const resetsAt = entitlement.window ? nextReset(entitlement.window) : null;
+			const resetsAt = entitlement.window ? nextReset(entitlement.window, evaluatedAt) : null;
 
 			quotas[action] = {
 				name: action,

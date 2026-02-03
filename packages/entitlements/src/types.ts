@@ -2,18 +2,13 @@
  * Core type definitions for the entitlements engine.
  */
 
+import type { Interval } from '@courierkit/core';
+export type { Interval };
+
 // ============================================================================
 // Time Types
 // ============================================================================
 
-/**
- * A half-open interval [start, end).
- * All times are UTC internally.
- */
-export interface Interval {
-	start: Date;
-	end: Date;
-}
 
 /**
  * Calendar unit for time-based windows.

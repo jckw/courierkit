@@ -29,6 +29,10 @@ async function check(input: CheckInput): Promise<Decision<{ allowed: boolean }>>
   The amount to consume. Use this for batch operations that consume multiple units at once.
 </ParamField>
 
+<ParamField path="at" type="Date">
+  Override for the current time. Useful for deterministic tests or backfills.
+</ParamField>
+
 ## Returns
 
 A `Decision` object:

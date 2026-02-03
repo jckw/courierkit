@@ -38,6 +38,30 @@ describe('Entitlements Engine', () => {
 			expect(decision.reasons[0].outcome).toBe('allow');
 		});
 
+		test('respects at override when resolving windows', async () => {
+			let receivedInterval: Interval | null = null;
+			const adapter: Adapter = {
+				async getEntitlements() {
+					return {
+						'api-calls': {
+							limit: 10,
+							window: { type: 'calendar', unit: 'day', timezone: 'UTC' },
+						},
+					};
+				},
+				async getUsage(_actorId, _action, interval) {
+					receivedInterval = interval;
+					return 0;
+				},
+			};
+
+			const engine = createEntitlements({ adapter });
+			const at = new Date('2024-01-15T12:34:00Z');
+			await engine.check({ actorId: 'user1', action: 'api-calls', at });
+
+			expect(receivedInterval?.start.toISOString()).toBe('2024-01-15T00:00:00.000Z');
+		});
+
 		test('denies action when no entitlement exists', async () => {
 			const adapter = createMockAdapter({
 				entitlements: { user1: {} },

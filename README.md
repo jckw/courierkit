@@ -4,6 +4,10 @@ A collection of stateless, composable libraries for building scheduling and enti
 
 ## Packages
 
+### [@courierkit/core](./packages/core)
+
+Shared time primitives used across CourierKit packages.
+
 ### [@courierkit/availability](./packages/availability)
 
 Slot generation library for booking systems. Given schedules, bookings, external calendar events, and event type configuration, it answers: **"When can this happen?"**

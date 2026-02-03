@@ -1,0 +1,83 @@
+---
+title: Data Model
+description: Suggested database schema and query patterns for entitlements
+---
+
+# Data Model
+
+The entitlements engine is stateless, so your database (or billing system) is the source of truth. Below is a minimal schema and query pattern that map cleanly to the adapter.
+
+## Minimal Entities
+
+- **Plans** (or entitlements) that define limits per action
+- **Subscriptions** mapping actors to plans
+- **Usage events** recorded when actions are performed
+
+## Example Schema (Relational)
+
+```sql
+create table plans (
+  id text primary key,
+  name text
+);
+
+create table plan_entitlements (
+  plan_id text not null references plans(id),
+  action text not null,               -- e.g. "api-calls"
+  limit integer,                      -- null = unlimited
+  window_type text,                   -- "calendar", "sliding", "lifetime", "fixed"
+  window_unit text,                   -- "day", "week", "month", "year"
+  window_timezone text,               -- optional IANA timezone
+  window_duration jsonb,              -- for sliding windows
+  window_start timestamptz,           -- for fixed windows
+  window_end timestamptz,
+  primary key (plan_id, action)
+);
+
+create table subscriptions (
+  actor_id text primary key,
+  plan_id text not null references plans(id),
+  status text not null
+);
+
+create table usage_events (
+  id text primary key,
+  actor_id text not null,
+  action text not null,
+  amount integer not null default 1,
+  occurred_at timestamptz not null
+);
+```
+
+## Query Boundaries
+
+When the adapter receives an interval, count usage within the half-open window `[start, end)`:
+
+```sql
+select coalesce(sum(amount), 0)
+from usage_events
+where actor_id = :actor_id
+  and action = :action
+  and occurred_at >= :start
+  and occurred_at < :end;
+```
+
+Recommended indexes:
+
+- `usage_events (actor_id, action, occurred_at)`
+- `plan_entitlements (plan_id, action)`
+
+## Rollups (Optional)
+
+For high-volume usage, store rollups by window:
+
+- `usage_rollups (actor_id, action, window_start, window_end, count)`
+
+Your adapter can choose the rollup table when the interval aligns with a rollup boundary.
+
+## Mapping to the Adapter
+
+- `subscriptions + plan_entitlements` → `getEntitlements(actorId)`
+- `usage_events` (or rollups) → `getUsage(actorId, action, interval)`
+
+If your entitlements are defined in Stripe or a feature flag system, keep this shape but load from those sources instead of a database.

@@ -7,22 +7,8 @@
  * responsibility at the input/output boundary.
  */
 
-/**
- * The universal primitive for time ranges.
- * All intervals are half-open: [start, end)
- *
- * @example
- * const interval: Interval = {
- *   start: new Date('2024-01-15T09:00:00Z'),
- *   end: new Date('2024-01-15T10:00:00Z')
- * };
- */
-export interface Interval {
-	/** The start of the interval (inclusive) */
-	start: Date;
-	/** The end of the interval (exclusive) */
-	end: Date;
-}
+import type { DateRange, Interval } from '@courierkit/core';
+export type { DateRange, Interval };
 
 /**
  * Days of the week used in schedule rules.
@@ -293,12 +279,6 @@ export interface Slot {
  *   end: new Date('2024-01-22T00:00:00Z')
  * };
  */
-export interface DateRange {
-	/** Start of the range (inclusive) */
-	start: Date;
-	/** End of the range (exclusive) */
-	end: Date;
-}
 
 /**
  * Input for the primary getAvailableSlots query.
@@ -365,6 +345,63 @@ export interface GetAvailableSlotsInput {
 	 * If a booking's event type is not in this map, its buffers are assumed to be zero.
 	 */
 	eventTypes?: Record<string, EventTypeBufferConfig>;
+}
+
+/**
+ * Adapter interface for loading availability data from your own storage.
+ */
+export interface AvailabilityAdapter {
+	/**
+	 * Return a fully-resolved event type by ID.
+	 */
+	getEventType: (eventTypeId: string) => Promise<EventType>;
+	/**
+	 * Return host schedules to consider for availability.
+	 * Implementations may use hostIds and/or eventTypeId to filter.
+	 */
+	getHosts: (input: { hostIds?: HostId[]; eventTypeId?: string }) => Promise<HostSchedules[]>;
+	/**
+	 * Return existing bookings for the given hosts and range.
+	 */
+	getBookings: (input: { hostIds: HostId[]; range: DateRange }) => Promise<Booking[]>;
+	/**
+	 * Return external blocks for the given hosts and range.
+	 */
+	getBlocks?: (input: { hostIds: HostId[]; range: DateRange }) => Promise<Block[]>;
+	/**
+	 * Return buffer configurations for any event type IDs present in bookings.
+	 */
+	getEventTypeBuffers?: (
+		input: { eventTypeIds: string[] },
+	) => Promise<Record<string, EventTypeBufferConfig>>;
+}
+
+/**
+ * Query input for availability engine adapters.
+ */
+export interface AvailabilityQuery {
+	/** Event type ID to book */
+	eventTypeId: string;
+	/** Optional host IDs to scope the query */
+	hostIds?: HostId[];
+	/** Date range to query */
+	range: DateRange;
+	/** Override for the current time (useful for tests) */
+	at?: Date;
+}
+
+/**
+ * Availability engine surface.
+ */
+export interface AvailabilityEngine {
+	getAvailableSlots: (input: AvailabilityQuery) => Promise<Slot[]>;
+}
+
+/**
+ * Options for creating an availability engine.
+ */
+export interface CreateAvailabilityOptions {
+	adapter: AvailabilityAdapter;
 }
 
 /**

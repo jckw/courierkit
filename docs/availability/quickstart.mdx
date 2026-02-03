@@ -238,6 +238,13 @@ const availableSlots = getAvailableSlots({
 console.log(`Found ${availableSlots.length} available slots`);
 ```
 
+## Database Setup (Optional but Recommended)
+
+The engine is stateless, so you'll store schedules, event types, bookings, and blocks in your own database.
+
+- See the [Data Model](/availability/concepts/data-model) guide for a concrete schema and query patterns.
+- If you don't want to assemble inputs manually, use [createAvailability](/availability/api-reference/create-availability) to load data via an adapter.
+
 ## Next Steps
 
 <CardGroup cols={2}>

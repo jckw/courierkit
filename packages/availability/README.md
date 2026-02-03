@@ -56,6 +56,52 @@ const slots = getAvailableSlots({
 // [{ hostId: 'dr-smith', start: Date, end: Date, bufferAfter?: Interval }, ...]
 ```
 
+## Adapter Engine (Optional)
+
+If you don't want to assemble inputs on every request, use `createAvailability` with an adapter:
+
+```typescript
+import { createAvailability } from '@courierkit/availability';
+
+const availability = createAvailability({
+  adapter: {
+    async getEventType(eventTypeId) {
+      return db.eventTypes.findById(eventTypeId);
+    },
+    async getHosts({ hostIds }) {
+      return db.hosts.withSchedules(hostIds);
+    },
+    async getBookings({ hostIds, range }) {
+      return db.bookings.overlap(hostIds, range);
+    },
+    async getBlocks({ hostIds, range }) {
+      return db.blocks.overlap(hostIds, range);
+    },
+    async getEventTypeBuffers({ eventTypeIds }) {
+      return db.eventTypes.bufferMap(eventTypeIds);
+    },
+  },
+});
+
+const slots = await availability.getAvailableSlots({
+  eventTypeId: 'consultation',
+  hostIds: ['dr-smith'],
+  range: { start: new Date('2024-01-15'), end: new Date('2024-01-22') },
+  at: new Date(), // optional override for "now"
+});
+```
+
+## Database Setup
+
+At minimum, you'll need tables/collections for:
+
+- Hosts and schedules (rules + overrides)
+- Event types (length, buffers, limits)
+- Bookings (with UTC start/end)
+- Optional external blocks
+
+For a concrete schema and query patterns, see the data model guide in the docs.
+
 ## How It Works
 
 Everything is an interval on a timeline. The engine layers intervals to produce available slots:

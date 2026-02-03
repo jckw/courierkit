@@ -58,6 +58,7 @@
     {
       "group": "Core Concepts",
       "pages": [
+        "availability/concepts/data-model",
         "availability/concepts/schedules",
         "availability/concepts/event-types",
         "availability/concepts/bookings-and-blocks",
@@ -75,6 +76,7 @@
     {
       "group": "API Reference",
       "pages": [
+        "availability/api-reference/create-availability",
         "availability/api-reference/get-available-slots",
         "availability/api-reference/expand-schedule",
         "availability/api-reference/expand-recurrence",
@@ -102,6 +104,7 @@
     {
       "group": "Core Concepts",
       "pages": [
+        "entitlements/concepts/data-model",
         "entitlements/concepts/time-windows"
       ]
     },

@@ -1,0 +1,126 @@
+---
+title: Data Model
+description: Suggested database schema and query patterns for availability
+---
+
+# Data Model
+
+This library is stateless, so your database is the source of truth. Below is a minimal schema and query pattern that map cleanly to `getAvailableSlots`.
+
+## Minimal Entities
+
+- **Hosts**: people/rooms/resources that can be booked
+- **Schedules**: base availability rules + overrides
+- **Event Types**: appointment definitions and constraints
+- **Bookings**: confirmed appointments (UTC)
+- **Blocks** (optional): external calendar events (UTC)
+
+## Example Schema (Relational)
+
+```sql
+-- Hosts
+create table hosts (
+  id text primary key,
+  name text
+);
+
+-- Schedules (one host can have multiple named schedules)
+create table schedules (
+  id text primary key,
+  host_id text not null references hosts(id),
+  key text not null -- e.g. "default", "telehealth"
+);
+
+-- Recurring rules (store days as an array or a join table)
+create table schedule_rules (
+  id text primary key,
+  schedule_id text not null references schedules(id),
+  days text[] not null, -- e.g. {"monday","tuesday"}
+  start_time text not null, -- "09:00"
+  end_time text not null,   -- "17:00"
+  timezone text not null,   -- "America/New_York"
+  effective_from date,
+  effective_until date
+);
+
+-- Overrides for specific dates
+create table schedule_overrides (
+  id text primary key,
+  schedule_id text not null references schedules(id),
+  date date not null,
+  available boolean not null,
+  start_time text,
+  end_time text
+);
+
+-- Event types
+create table event_types (
+  id text primary key,
+  name text,
+  schedule_key text default 'default',
+  length_ms integer not null,
+  buffer_before_ms integer,
+  buffer_after_ms integer,
+  slot_interval_ms integer,
+  minimum_notice_ms integer,
+  maximum_lead_time_ms integer,
+  max_per_day integer,
+  max_per_week integer
+);
+
+-- Per-host overrides for event types
+create table event_type_host_overrides (
+  event_type_id text not null references event_types(id),
+  host_id text not null references hosts(id),
+  overrides jsonb not null,
+  primary key (event_type_id, host_id)
+);
+
+-- Bookings (UTC)
+create table bookings (
+  id text primary key,
+  host_id text not null references hosts(id),
+  event_type_id text references event_types(id),
+  start_utc timestamptz not null,
+  end_utc timestamptz not null,
+  status text not null
+);
+
+-- External blocks (UTC)
+create table blocks (
+  id text primary key,
+  host_id text not null references hosts(id),
+  source text,
+  start_utc timestamptz not null,
+  end_utc timestamptz not null
+);
+```
+
+## Query Boundaries
+
+Fetch only data that overlaps the query range:
+
+```sql
+-- Overlap predicate for half-open intervals [start, end)
+where start_utc < :range_end and end_utc > :range_start
+```
+
+Recommended indexes:
+
+- `bookings (host_id, start_utc)`
+- `blocks (host_id, start_utc)`
+- `schedule_rules (schedule_id)`
+- `schedule_overrides (schedule_id, date)`
+
+## Mapping to CourierKit Types
+
+- `schedules + schedule_rules + schedule_overrides` → `HostSchedules`
+- `event_types + event_type_host_overrides` → `EventType` (+ `hostOverrides`)
+- `bookings` → `Booking[]`
+- `blocks` → `Block[]`
+
+If your existing schema differs, adapt in your data layer or an adapter (see `createAvailability`).
+
+## Buffer Inflation for Bookings
+
+Bookings are inflated by **their own** event type buffers. To support this, build an `eventTypes` buffer map from your `event_types` table and pass it into `getAvailableSlots`, or implement `getEventTypeBuffers` in your adapter.

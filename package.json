@@ -10,7 +10,7 @@
     "test": "yarn workspaces foreach -Ap run test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "yarn workspaces foreach -Ap run typecheck"
+    "typecheck": "yarn build && yarn workspaces foreach -Ap run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",

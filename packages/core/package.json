@@ -1,7 +1,7 @@
 {
-  "name": "@courierkit/availability",
+  "name": "@courierkit/core",
   "version": "0.1.0",
-  "description": "A stateless, composable slot generation library for Node.js",
+  "description": "Shared primitives for CourierKit packages",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,11 +15,6 @@
     "build": "tsc",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@courierkit/core": "workspace:*",
-    "date-fns": "^4.1.0",
-    "date-fns-tz": "^3.2.0"
   },
   "devDependencies": {
     "bun-types": "^1.3.8"

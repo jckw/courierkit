@@ -16,18 +16,25 @@ export { intersectIntervals, mergeIntervals, subtractIntervals } from './interva
 export { expandSchedule } from './schedule.js';
 // Main query function
 export { getAvailableSlots } from './slots.js';
+// Adapter-based engine
+export { createAvailability } from './engine.js';
 
 // All types
 export type {
 	Block,
 	// Booking types
+	AvailabilityAdapter,
+	AvailabilityEngine,
+	AvailabilityQuery,
 	Booking,
 	BusyPeriod,
 	CalendarBusy,
+	CreateAvailabilityOptions,
 	DateRange,
 	DateTime,
 	DayOfWeek,
 	Duration,
+	EventTypeBufferConfig,
 	// Event types
 	EventType,
 	FreeBusyResponse,

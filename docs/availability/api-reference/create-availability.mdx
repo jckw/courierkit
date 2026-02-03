@@ -1,0 +1,98 @@
+---
+title: createAvailability
+description: Create an availability engine with an adapter
+---
+
+# createAvailability
+
+Creates an availability engine configured with your data adapter.
+
+## Signature
+
+```typescript
+function createAvailability(options: CreateAvailabilityOptions): AvailabilityEngine
+```
+
+## Parameters
+
+### options
+
+<ParamField path="adapter" type="AvailabilityAdapter" required>
+  The adapter that connects the engine to your data sources.
+
+  ```typescript
+  interface AvailabilityAdapter {
+    getEventType(eventTypeId: string): Promise<EventType>;
+    getHosts(input: { hostIds?: string[]; eventTypeId?: string }): Promise<HostSchedules[]>;
+    getBookings(input: { hostIds: string[]; range: DateRange }): Promise<Booking[]>;
+    getBlocks?(input: { hostIds: string[]; range: DateRange }): Promise<Block[]>;
+    getEventTypeBuffers?(input: { eventTypeIds: string[] }):
+      Promise<Record<string, EventTypeBufferConfig>>;
+  }
+  ```
+</ParamField>
+
+## Returns
+
+An `AvailabilityEngine` with the following methods:
+
+| Method | Description |
+|--------|-------------|
+| `getAvailableSlots(input)` | Load data via the adapter and compute available slots |
+
+### getAvailableSlots Input
+
+```typescript
+interface AvailabilityQuery {
+  eventTypeId: string;
+  hostIds?: string[];
+  range: DateRange;
+  at?: Date; // override for "now"
+}
+```
+
+## Example
+
+```typescript
+import { createAvailability } from '@courierkit/availability';
+
+const availability = createAvailability({
+  adapter: {
+    async getEventType(eventTypeId) {
+      return db.eventTypes.findById(eventTypeId);
+    },
+    async getHosts({ hostIds }) {
+      return db.hosts.withSchedules(hostIds);
+    },
+    async getBookings({ hostIds, range }) {
+      return db.bookings.overlap(hostIds, range);
+    },
+    async getBlocks({ hostIds, range }) {
+      return db.blocks.overlap(hostIds, range);
+    },
+    async getEventTypeBuffers({ eventTypeIds }) {
+      return db.eventTypes.bufferMap(eventTypeIds);
+    },
+  },
+});
+
+const slots = await availability.getAvailableSlots({
+  eventTypeId: 'consultation',
+  hostIds: ['dr-smith'],
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+  at: new Date(), // optional override for "now"
+});
+```
+
+## Adapter Notes
+
+- `getBookings` and `getBlocks` should return only records that overlap the range.
+- `getEventTypeBuffers` is optional; if omitted, existing bookings are inflated using only the queried event type's buffers (other event types default to zero buffers).
+
+## See Also
+
+- [getAvailableSlots](/availability/api-reference/get-available-slots) - Core slot computation
+- [Data Model](/availability/concepts/data-model) - Suggested database schema
