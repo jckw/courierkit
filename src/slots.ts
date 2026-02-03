@@ -9,6 +9,7 @@ import type {
 	Booking,
 	Duration,
 	EventType,
+	EventTypeBufferConfig,
 	GetAvailableSlotsInput,
 	HostId,
 	Interval,
@@ -148,6 +149,7 @@ function countBookings(
 
 /**
  * Generates candidate slots from free intervals at regular intervals.
+ * Per Addendum A: The inflated slot (slot + buffers) must fit entirely within free space.
  *
  * @param freeIntervals - Available time intervals
  * @param slotLength - Duration of each slot
@@ -168,11 +170,19 @@ function generateCandidateSlots(
 	const slots: Slot[] = [];
 
 	for (const interval of freeIntervals) {
-		let slotStart = interval.start.getTime();
+		// The inflated slot must fit within the free interval
+		// Inflated slot: [slotStart - bufferBefore, slotEnd + bufferAfter)
+		// So we need: slotStart - bufferBefore >= interval.start
+		//         and: slotEnd + bufferAfter <= interval.end
+		const intervalStart = interval.start.getTime();
 		const intervalEnd = interval.end.getTime();
 
+		// Earliest possible slot start: interval start + bufferBefore
+		let slotStart = intervalStart + bufferBefore;
+
 		// Walk through the interval, placing slots at every slotInterval step
-		while (slotStart + slotLength <= intervalEnd) {
+		// The inflated slot [slotStart - bufferBefore, slotEnd + bufferAfter) must fit
+		while (slotStart + slotLength + bufferAfter <= intervalEnd) {
 			const slotEnd = slotStart + slotLength;
 
 			const slot: Slot = {
@@ -338,14 +348,26 @@ export function getAvailableSlots(input: GetAvailableSlotsInput, now?: Date): Sl
 		let freeIntervals = expandSchedule(schedule, range);
 
 		// Step 2: Subtract busy intervals (bookings and blocks for this host)
+		// Per Addendum A: Each booking is inflated by its OWN event type's buffers,
+		// not the queried event type's buffers.
 		const hostBookings = bookings.filter((b) => b.hostId === hostId);
 		const hostBlocks = blocks.filter((b) => b.hostId === hostId);
 
-		// Inflate bookings by buffer amounts to protect buffer zones
+		// Inflate bookings by their OWN event type's buffer amounts
 		const busyIntervals: Interval[] = [
-			...hostBookings.map((booking) =>
-				inflateInterval({ start: booking.start, end: booking.end }, bufferBefore, bufferAfter),
-			),
+			...hostBookings.map((booking) => {
+				// Look up this booking's event type buffers from the eventTypes map
+				const bookingEventTypeConfig = booking.eventTypeId
+					? input.eventTypes?.[booking.eventTypeId]
+					: undefined;
+				const bookingBufferBefore = bookingEventTypeConfig?.bufferBefore ?? 0;
+				const bookingBufferAfter = bookingEventTypeConfig?.bufferAfter ?? 0;
+				return inflateInterval(
+					{ start: booking.start, end: booking.end },
+					bookingBufferBefore,
+					bookingBufferAfter,
+				);
+			}),
 			...hostBlocks.map((block) => ({ start: block.start, end: block.end })),
 		];
 

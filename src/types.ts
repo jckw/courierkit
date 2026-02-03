@@ -316,6 +316,37 @@ export interface DateRange {
  *   }
  * };
  */
+/**
+ * Buffer configuration for an event type.
+ * Used to look up buffer durations for existing bookings.
+ */
+export interface EventTypeBufferConfig {
+	/** Blocked time before the slot (prep time) */
+	bufferBefore?: Duration;
+	/** Blocked time after the slot (wrap-up time) */
+	bufferAfter?: Duration;
+}
+
+/**
+ * Input for the primary getAvailableSlots query.
+ * Provides all data needed to compute available booking slots.
+ *
+ * @example
+ * const input: GetAvailableSlotsInput = {
+ *   eventType: consultation,
+ *   hosts: [drSmithSchedules, drJonesSchedules],
+ *   bookings: existingBookings,
+ *   blocks: calendarBlocks,
+ *   range: {
+ *     start: new Date('2024-01-15T00:00:00Z'),
+ *     end: new Date('2024-01-22T00:00:00Z')
+ *   },
+ *   eventTypes: {
+ *     'initial_visit': { bufferBefore: 0, bufferAfter: 15 * 60 * 1000 },
+ *     'follow_up': { bufferBefore: 0, bufferAfter: 5 * 60 * 1000 }
+ *   }
+ * };
+ */
 export interface GetAvailableSlotsInput {
 	/** The event type being booked */
 	eventType: EventType;
@@ -327,6 +358,13 @@ export interface GetAvailableSlotsInput {
 	blocks?: Block[];
 	/** The date range to query for available slots */
 	range: DateRange;
+	/**
+	 * Optional map of event type IDs to their buffer configurations.
+	 * Used to look up buffer durations for existing bookings.
+	 * Each booking is inflated by its OWN event type's buffers, not the queried event type.
+	 * If a booking's event type is not in this map, its buffers are assumed to be zero.
+	 */
+	eventTypes?: Record<string, EventTypeBufferConfig>;
 }
 
 /**
