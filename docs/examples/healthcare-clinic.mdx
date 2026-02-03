@@ -1,0 +1,640 @@
+---
+title: Healthcare Clinic
+description: Complete booking system for a multi-provider medical practice
+---
+
+# Healthcare Clinic Example
+
+This example builds a complete availability system for a medical clinic with multiple providers, different appointment types, and complex scheduling rules.
+
+## The Scenario
+
+**Acme Family Medicine** has:
+- 3 physicians with different schedules
+- Multiple appointment types (new patient, follow-up, physicals, urgent care)
+- Buffer time requirements for different visit types
+- Daily and weekly capacity limits
+- Integration with providers' personal calendars
+
+## Step 1: Define the Providers
+
+Each provider has their own schedule with different hours:
+
+```typescript
+import type { HostSchedules, Schedule } from '@courierkit/availability';
+
+// Dr. Sarah Chen - Full-time, office-based
+const drChen: HostSchedules = {
+  hostId: 'dr-chen',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        // Monday-Thursday: Full days with lunch break
+        {
+          days: ['monday', 'tuesday', 'wednesday', 'thursday'],
+          startTime: '08:00',
+          endTime: '12:00',
+          timezone: 'America/Denver',
+        },
+        {
+          days: ['monday', 'tuesday', 'wednesday', 'thursday'],
+          startTime: '13:00',
+          endTime: '17:00',
+          timezone: 'America/Denver',
+        },
+        // Friday: Half day
+        {
+          days: ['friday'],
+          startTime: '08:00',
+          endTime: '12:00',
+          timezone: 'America/Denver',
+        },
+      ],
+      overrides: [
+        // Taking a personal day
+        { date: '2024-02-14', available: false },
+        // Medical conference
+        { date: '2024-03-15', available: false },
+        { date: '2024-03-16', available: false },
+      ],
+    },
+  },
+};
+
+// Dr. Marcus Williams - Part-time, splits time with hospital
+const drWilliams: HostSchedules = {
+  hostId: 'dr-williams',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        // Only in clinic Tue/Thu afternoons and Wed all day
+        {
+          days: ['tuesday', 'thursday'],
+          startTime: '13:00',
+          endTime: '18:00',
+          timezone: 'America/Denver',
+        },
+        {
+          days: ['wednesday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/Denver',
+        },
+      ],
+    },
+  },
+};
+
+// Dr. Emily Rodriguez - Hybrid schedule with telehealth
+const drRodriguez: HostSchedules = {
+  hostId: 'dr-rodriguez',
+  schedules: {
+    // In-office schedule
+    default: {
+      id: 'default',
+      rules: [
+        {
+          days: ['monday', 'wednesday', 'friday'],
+          startTime: '09:00',
+          endTime: '16:00',
+          timezone: 'America/Denver',
+        },
+      ],
+    },
+    // Telehealth has extended hours
+    telehealth: {
+      id: 'telehealth',
+      rules: [
+        {
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '07:00',
+          endTime: '19:00',
+          timezone: 'America/Denver',
+        },
+        // Saturday morning telehealth
+        {
+          days: ['saturday'],
+          startTime: '09:00',
+          endTime: '12:00',
+          timezone: 'America/Denver',
+        },
+      ],
+    },
+  },
+};
+
+const allProviders = [drChen, drWilliams, drRodriguez];
+```
+
+## Step 2: Define Appointment Types
+
+Different visit types have different requirements:
+
+```typescript
+import type { EventType } from '@courierkit/availability';
+
+// Duration constants for readability
+const MINUTES = 60 * 1000;
+const HOURS = 60 * MINUTES;
+const DAYS = 24 * HOURS;
+
+// New patient visit - comprehensive intake
+const newPatientVisit: EventType = {
+  id: 'new-patient',
+  length: 45 * MINUTES,
+  bufferBefore: 10 * MINUTES,  // Review intake paperwork
+  bufferAfter: 15 * MINUTES,   // Document and create care plan
+  slotInterval: 30 * MINUTES,  // Align to half-hour grid
+  minimumNotice: 24 * HOURS,   // Need time to send intake forms
+  maximumLeadTime: 60 * DAYS,  // Book up to 2 months out
+  maxPerDay: 4,                // Limit intensive appointments
+
+  hostOverrides: {
+    'dr-williams': {
+      maxPerDay: 2, // Part-time, fewer new patients
+    },
+  },
+};
+
+// Follow-up visit - shorter, more flexible
+const followUpVisit: EventType = {
+  id: 'follow-up',
+  length: 20 * MINUTES,
+  bufferAfter: 5 * MINUTES,
+  slotInterval: 15 * MINUTES,
+  minimumNotice: 4 * HOURS,
+  maxPerDay: 12,
+};
+
+// Annual physical - longest appointment
+const annualPhysical: EventType = {
+  id: 'annual-physical',
+  length: 60 * MINUTES,
+  bufferBefore: 10 * MINUTES,
+  bufferAfter: 20 * MINUTES,  // Labs review, care plan
+  slotInterval: 30 * MINUTES,
+  minimumNotice: 7 * DAYS,    // Week's notice for prep
+  maximumLeadTime: 90 * DAYS,
+  maxPerDay: 3,
+  maxPerWeek: 10,
+};
+
+// Urgent/same-day visit
+const urgentVisit: EventType = {
+  id: 'urgent',
+  length: 15 * MINUTES,
+  bufferAfter: 5 * MINUTES,
+  minimumNotice: 0,           // Can book immediately
+  maximumLeadTime: 24 * HOURS, // Same-day only
+  maxPerDay: 6,               // Limited urgent capacity
+};
+
+// Telehealth visit
+const telehealthVisit: EventType = {
+  id: 'telehealth',
+  length: 20 * MINUTES,
+  scheduleKey: 'telehealth',  // Uses telehealth schedule
+  slotInterval: 15 * MINUTES,
+  minimumNotice: 2 * HOURS,
+  maxPerDay: 15,              // Can do more virtually
+
+  hostOverrides: {
+    'dr-chen': {
+      maxPerDay: 0, // Dr. Chen doesn't do telehealth
+    },
+    'dr-williams': {
+      maxPerDay: 0, // Dr. Williams doesn't do telehealth
+    },
+  },
+};
+
+// Event types map for buffer lookup
+const eventTypesConfig = {
+  'new-patient': { bufferBefore: 10 * MINUTES, bufferAfter: 15 * MINUTES },
+  'follow-up': { bufferAfter: 5 * MINUTES },
+  'annual-physical': { bufferBefore: 10 * MINUTES, bufferAfter: 20 * MINUTES },
+  'urgent': { bufferAfter: 5 * MINUTES },
+  'telehealth': {},
+};
+```
+
+## Step 3: Fetch Existing Data
+
+In a real app, you'd fetch from your database and external calendars:
+
+```typescript
+import type { Booking, Block } from '@courierkit/availability';
+import { buildBlocksFromFreebusy } from '@courierkit/availability';
+
+// Simulating database fetch
+async function fetchBookingsFromDatabase(
+  providerIds: string[],
+  range: { start: Date; end: Date }
+): Promise<Booking[]> {
+  // In reality: query your database
+  // SELECT * FROM appointments
+  // WHERE provider_id IN (...)
+  // AND start_time < range.end
+  // AND end_time > range.start
+  // AND status != 'cancelled'
+
+  return [
+    {
+      id: 'apt-001',
+      hostId: 'dr-chen',
+      start: new Date('2024-01-15T15:00:00Z'), // 8am Denver
+      end: new Date('2024-01-15T15:45:00Z'),
+      eventTypeId: 'new-patient',
+    },
+    {
+      id: 'apt-002',
+      hostId: 'dr-chen',
+      start: new Date('2024-01-15T17:00:00Z'), // 10am Denver
+      end: new Date('2024-01-15T17:20:00Z'),
+      eventTypeId: 'follow-up',
+    },
+    {
+      id: 'apt-003',
+      hostId: 'dr-rodriguez',
+      start: new Date('2024-01-15T16:00:00Z'),
+      end: new Date('2024-01-15T17:00:00Z'),
+      eventTypeId: 'annual-physical',
+    },
+  ];
+}
+
+// Fetch external calendar blocks (Google Calendar integration)
+async function fetchCalendarBlocks(
+  providerIds: string[],
+  range: { start: Date; end: Date }
+): Promise<Block[]> {
+  // Map provider IDs to their Google Calendar IDs
+  const calendarMapping: Record<string, string> = {
+    'dr-chen': 'dr.chen@acmefamilymedicine.com',
+    'dr-williams': 'marcus.williams@acmefamilymedicine.com',
+    'dr-rodriguez': 'emily.rodriguez@acmefamilymedicine.com',
+  };
+
+  const blocks: Block[] = [];
+
+  for (const providerId of providerIds) {
+    const calendarId = calendarMapping[providerId];
+    if (!calendarId) continue;
+
+    // Fetch from Google Calendar FreeBusy API
+    // const freebusy = await googleCalendar.freebusy.query({ ... });
+    // const providerBlocks = buildBlocksFromFreebusy(freebusy.data, providerId);
+    // blocks.push(...providerBlocks);
+
+    // Simulated response
+    if (providerId === 'dr-chen') {
+      blocks.push({
+        hostId: 'dr-chen',
+        start: new Date('2024-01-15T18:00:00Z'), // 11am Denver - staff meeting
+        end: new Date('2024-01-15T19:00:00Z'),
+      });
+    }
+  }
+
+  return blocks;
+}
+```
+
+## Step 4: Build the Availability Service
+
+Put it all together in a service class:
+
+```typescript
+import { getAvailableSlots, type Slot, type DateRange } from '@courierkit/availability';
+
+interface AvailabilityQuery {
+  appointmentType: string;
+  providerIds?: string[];  // Optional: specific providers, or all
+  range: DateRange;
+}
+
+interface AvailabilityResult {
+  slots: Slot[];
+  providers: { id: string; name: string }[];
+}
+
+class AvailabilityService {
+  private providers = new Map([
+    ['dr-chen', { schedules: drChen, name: 'Dr. Sarah Chen' }],
+    ['dr-williams', { schedules: drWilliams, name: 'Dr. Marcus Williams' }],
+    ['dr-rodriguez', { schedules: drRodriguez, name: 'Dr. Emily Rodriguez' }],
+  ]);
+
+  private eventTypes = new Map([
+    ['new-patient', newPatientVisit],
+    ['follow-up', followUpVisit],
+    ['annual-physical', annualPhysical],
+    ['urgent', urgentVisit],
+    ['telehealth', telehealthVisit],
+  ]);
+
+  async getAvailability(query: AvailabilityQuery): Promise<AvailabilityResult> {
+    const eventType = this.eventTypes.get(query.appointmentType);
+    if (!eventType) {
+      throw new Error(`Unknown appointment type: ${query.appointmentType}`);
+    }
+
+    // Determine which providers to check
+    const providerIds = query.providerIds ?? Array.from(this.providers.keys());
+    const hosts = providerIds
+      .map(id => this.providers.get(id)?.schedules)
+      .filter((h): h is HostSchedules => h !== undefined);
+
+    // Fetch data in parallel
+    const [bookings, blocks] = await Promise.all([
+      fetchBookingsFromDatabase(providerIds, query.range),
+      fetchCalendarBlocks(providerIds, query.range),
+    ]);
+
+    // Compute available slots
+    const slots = getAvailableSlots({
+      eventType,
+      hosts,
+      bookings,
+      blocks,
+      range: query.range,
+      eventTypes: eventTypesConfig,
+    });
+
+    // Build provider info for display
+    const providerInfo = providerIds
+      .map(id => {
+        const provider = this.providers.get(id);
+        return provider ? { id, name: provider.name } : null;
+      })
+      .filter((p): p is { id: string; name: string } => p !== null);
+
+    return { slots, providers: providerInfo };
+  }
+
+  // Get next available slot per provider
+  async getNextAvailable(
+    appointmentType: string
+  ): Promise<Map<string, Slot | null>> {
+    const result = new Map<string, Slot | null>();
+    const now = new Date();
+    const twoWeeksOut = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+    for (const [providerId, provider] of this.providers) {
+      const { slots } = await this.getAvailability({
+        appointmentType,
+        providerIds: [providerId],
+        range: { start: now, end: twoWeeksOut },
+      });
+
+      result.set(providerId, slots[0] ?? null);
+    }
+
+    return result;
+  }
+}
+
+// Usage
+const service = new AvailabilityService();
+
+// Get all new patient slots for next week
+const availability = await service.getAvailability({
+  appointmentType: 'new-patient',
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+});
+
+console.log(`Found ${availability.slots.length} available slots`);
+
+// Get next available for each provider
+const nextSlots = await service.getNextAvailable('follow-up');
+for (const [providerId, slot] of nextSlots) {
+  if (slot) {
+    console.log(`${providerId}: Next available at ${slot.start.toISOString()}`);
+  } else {
+    console.log(`${providerId}: No availability in next 2 weeks`);
+  }
+}
+```
+
+## Step 5: API Endpoint
+
+Expose availability through your API:
+
+```typescript
+// Express.js example
+import express from 'express';
+
+const app = express();
+const availabilityService = new AvailabilityService();
+
+app.get('/api/availability', async (req, res) => {
+  try {
+    const {
+      appointmentType,
+      providers,      // comma-separated provider IDs
+      startDate,
+      endDate,
+      timezone = 'America/Denver',
+    } = req.query;
+
+    if (!appointmentType || !startDate || !endDate) {
+      return res.status(400).json({
+        error: 'Missing required parameters: appointmentType, startDate, endDate',
+      });
+    }
+
+    const providerIds = providers
+      ? String(providers).split(',')
+      : undefined;
+
+    const result = await availabilityService.getAvailability({
+      appointmentType: String(appointmentType),
+      providerIds,
+      range: {
+        start: new Date(String(startDate)),
+        end: new Date(String(endDate)),
+      },
+    });
+
+    // Format slots for the response
+    const formattedSlots = result.slots.map(slot => ({
+      providerId: slot.hostId,
+      providerName: result.providers.find(p => p.id === slot.hostId)?.name,
+      startTime: slot.start.toISOString(),
+      endTime: slot.end.toISOString(),
+      // Include local time for convenience
+      localStartTime: slot.start.toLocaleString('en-US', { timeZone: timezone }),
+    }));
+
+    res.json({
+      appointmentType,
+      range: { startDate, endDate },
+      providers: result.providers,
+      slots: formattedSlots,
+      totalSlots: formattedSlots.length,
+    });
+  } catch (error) {
+    console.error('Availability error:', error);
+    res.status(500).json({ error: 'Failed to compute availability' });
+  }
+});
+
+// GET /api/availability?appointmentType=new-patient&startDate=2024-01-15&endDate=2024-01-22
+```
+
+## Step 6: Frontend Display
+
+Group slots by day and provider for a user-friendly picker:
+
+```typescript
+interface GroupedSlots {
+  [date: string]: {
+    [providerId: string]: Slot[];
+  };
+}
+
+function groupSlotsByDateAndProvider(
+  slots: Slot[],
+  timezone: string
+): GroupedSlots {
+  const grouped: GroupedSlots = {};
+
+  for (const slot of slots) {
+    // Get date in user's timezone
+    const dateKey = slot.start.toLocaleDateString('en-CA', { timeZone: timezone });
+
+    if (!grouped[dateKey]) {
+      grouped[dateKey] = {};
+    }
+    if (!grouped[dateKey][slot.hostId]) {
+      grouped[dateKey][slot.hostId] = [];
+    }
+
+    grouped[dateKey][slot.hostId].push(slot);
+  }
+
+  return grouped;
+}
+
+// Usage
+const grouped = groupSlotsByDateAndProvider(availability.slots, 'America/Denver');
+
+// Result structure:
+// {
+//   "2024-01-15": {
+//     "dr-chen": [{ start: ..., end: ... }, ...],
+//     "dr-rodriguez": [{ start: ..., end: ... }, ...],
+//   },
+//   "2024-01-16": { ... }
+// }
+```
+
+## Complete Working Code
+
+Here's the full example in a single file:
+
+```typescript
+import {
+  getAvailableSlots,
+  type EventType,
+  type HostSchedules,
+  type Booking,
+  type Block,
+  type Slot,
+  type DateRange,
+} from '@courierkit/availability';
+
+// === Constants ===
+const MINUTES = 60 * 1000;
+const HOURS = 60 * MINUTES;
+const DAYS = 24 * HOURS;
+
+// === Providers ===
+const drChen: HostSchedules = {
+  hostId: 'dr-chen',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        { days: ['monday', 'tuesday', 'wednesday', 'thursday'], startTime: '08:00', endTime: '12:00', timezone: 'America/Denver' },
+        { days: ['monday', 'tuesday', 'wednesday', 'thursday'], startTime: '13:00', endTime: '17:00', timezone: 'America/Denver' },
+        { days: ['friday'], startTime: '08:00', endTime: '12:00', timezone: 'America/Denver' },
+      ],
+    },
+  },
+};
+
+const drWilliams: HostSchedules = {
+  hostId: 'dr-williams',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        { days: ['tuesday', 'thursday'], startTime: '13:00', endTime: '18:00', timezone: 'America/Denver' },
+        { days: ['wednesday'], startTime: '09:00', endTime: '17:00', timezone: 'America/Denver' },
+      ],
+    },
+  },
+};
+
+const drRodriguez: HostSchedules = {
+  hostId: 'dr-rodriguez',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        { days: ['monday', 'wednesday', 'friday'], startTime: '09:00', endTime: '16:00', timezone: 'America/Denver' },
+      ],
+    },
+  },
+};
+
+// === Event Types ===
+const newPatientVisit: EventType = {
+  id: 'new-patient',
+  length: 45 * MINUTES,
+  bufferBefore: 10 * MINUTES,
+  bufferAfter: 15 * MINUTES,
+  slotInterval: 30 * MINUTES,
+  minimumNotice: 24 * HOURS,
+  maxPerDay: 4,
+};
+
+// === Main Function ===
+async function main() {
+  const slots = getAvailableSlots({
+    eventType: newPatientVisit,
+    hosts: [drChen, drWilliams, drRodriguez],
+    bookings: [],
+    range: {
+      start: new Date('2024-01-15T00:00:00Z'),
+      end: new Date('2024-01-22T00:00:00Z'),
+    },
+    eventTypes: {
+      'new-patient': { bufferBefore: 10 * MINUTES, bufferAfter: 15 * MINUTES },
+    },
+  });
+
+  console.log(`Found ${slots.length} available new patient slots`);
+
+  // Show first 5 slots
+  slots.slice(0, 5).forEach(slot => {
+    const localTime = slot.start.toLocaleString('en-US', {
+      timeZone: 'America/Denver',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    console.log(`  ${slot.hostId}: ${localTime}`);
+  });
+}
+
+main();
+```

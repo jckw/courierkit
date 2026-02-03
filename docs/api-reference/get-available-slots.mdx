@@ -1,0 +1,218 @@
+---
+title: getAvailableSlots
+description: The primary query function for computing available booking slots
+---
+
+# getAvailableSlots
+
+The main entry point for the slot engine. Given schedules, bookings, blocks, and an event type, returns all available booking slots.
+
+## Signature
+
+```typescript
+function getAvailableSlots(
+  input: GetAvailableSlotsInput,
+  now?: Date
+): Slot[]
+```
+
+## Parameters
+
+<ParamField path="input" type="GetAvailableSlotsInput" required>
+  The input object containing all data needed to compute availability.
+
+  <Expandable title="GetAvailableSlotsInput properties">
+    <ParamField path="eventType" type="EventType" required>
+      The event type being booked, including duration and constraints.
+    </ParamField>
+
+    <ParamField path="hosts" type="HostSchedules[]" required>
+      One or more hosts to check availability for.
+    </ParamField>
+
+    <ParamField path="bookings" type="Booking[]" required>
+      Existing bookings across all hosts. Pass an empty array if none.
+    </ParamField>
+
+    <ParamField path="blocks" type="Block[]">
+      External calendar blocks (e.g., from Google Calendar). Optional.
+    </ParamField>
+
+    <ParamField path="range" type="DateRange" required>
+      The date range to query for available slots.
+    </ParamField>
+
+    <ParamField path="eventTypes" type="Record<string, EventTypeBufferConfig>">
+      Map of event type IDs to their buffer configurations. Used to inflate existing bookings by their correct buffer amounts.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="now" type="Date">
+  Override for the current time. Useful for testing. Defaults to `new Date()`.
+</ParamField>
+
+## Returns
+
+`Slot[]` — An array of available slots, sorted by `start` time, then by `hostId`.
+
+```typescript
+interface Slot {
+  hostId: string;
+  start: Date;
+  end: Date;
+  bufferBefore?: Interval;  // If bufferBefore is configured
+  bufferAfter?: Interval;   // If bufferAfter is configured
+}
+```
+
+## Algorithm
+
+For each host, the engine:
+
+1. **Expand schedule** — Convert the host's schedule into UTC intervals for the query range
+2. **Subtract busy intervals** — Remove bookings (inflated by their buffers) and blocks
+3. **Apply minimum notice** — Remove intervals starting before `now + minimumNotice`
+4. **Apply maximum lead time** — Clamp the range to `now + maximumLeadTime`
+5. **Generate candidate slots** — Walk free intervals at `slotInterval` steps
+6. **Apply daily/weekly caps** — Skip slots on days/weeks at capacity
+7. **Collect and sort** — Merge across hosts, sort by time then hostId
+
+## Examples
+
+### Basic Usage
+
+```typescript
+import { getAvailableSlots } from '@courierkit/availability';
+
+const slots = getAvailableSlots({
+  eventType: {
+    id: 'meeting',
+    length: 30 * 60 * 1000, // 30 minutes
+  },
+  hosts: [{
+    hostId: 'room-a',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/New_York',
+        }],
+      },
+    },
+  }],
+  bookings: [],
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+});
+```
+
+### With Buffers and Constraints
+
+```typescript
+const slots = getAvailableSlots({
+  eventType: {
+    id: 'consultation',
+    length: 60 * 60 * 1000,
+    bufferBefore: 15 * 60 * 1000,
+    bufferAfter: 15 * 60 * 1000,
+    minimumNotice: 24 * 60 * 60 * 1000,
+    maxPerDay: 4,
+  },
+  hosts: [drSmith, drJones],
+  bookings: existingBookings,
+  blocks: googleCalendarBlocks,
+  range: nextWeek,
+  eventTypes: {
+    'consultation': { bufferBefore: 15 * 60 * 1000, bufferAfter: 15 * 60 * 1000 },
+    'follow-up': { bufferAfter: 5 * 60 * 1000 },
+  },
+});
+```
+
+### With Host Overrides
+
+```typescript
+const slots = getAvailableSlots({
+  eventType: {
+    id: 'therapy',
+    length: 50 * 60 * 1000,
+    slotInterval: 60 * 60 * 1000,
+    maxPerDay: 6,
+    hostOverrides: {
+      'therapist-jones': {
+        maxPerDay: 4,  // This therapist sees fewer patients
+      },
+    },
+  },
+  hosts: allTherapists,
+  bookings: existingBookings,
+  range: thisMonth,
+});
+```
+
+### Using a Custom Schedule Key
+
+```typescript
+const telehealthSlots = getAvailableSlots({
+  eventType: {
+    id: 'telehealth-visit',
+    length: 20 * 60 * 1000,
+    scheduleKey: 'telehealth',  // Uses 'telehealth' schedule instead of 'default'
+  },
+  hosts: [{
+    hostId: 'dr-smith',
+    schedules: {
+      default: officeSchedule,
+      telehealth: extendedHoursSchedule,
+    },
+  }],
+  bookings: [],
+  range: nextWeek,
+});
+```
+
+### Testing with Fixed Time
+
+```typescript
+// Useful for deterministic tests
+const fixedNow = new Date('2024-01-15T10:00:00Z');
+
+const slots = getAvailableSlots({
+  eventType: consultation,
+  hosts: [drSmith],
+  bookings: [],
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+}, fixedNow);  // Pass fixed time as second argument
+```
+
+## Buffer Inflation Behavior
+
+When subtracting existing bookings, each booking is inflated by **its own** event type's buffers, not the queried event type's buffers.
+
+```typescript
+// Existing booking: 60-min consultation with 15-min buffers
+// Query: 30-min follow-up with 5-min buffer
+
+// The existing consultation blocks:
+//   [start - 15min, end + 15min]
+// NOT:
+//   [start - 5min, end + 5min]
+```
+
+To enable this, pass the `eventTypes` map with buffer configurations for all event types that might have existing bookings.
+
+## Performance Tips
+
+1. **Narrow the range**: Only query the range you need
+2. **Filter hosts upfront**: Don't include hosts that can't provide the event type
+3. **Pre-filter bookings**: Only pass bookings that overlap with the query range
+4. **Batch calendar fetches**: Fetch external calendar blocks in parallel before calling this function

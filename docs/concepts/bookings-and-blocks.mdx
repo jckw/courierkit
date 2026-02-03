@@ -1,0 +1,253 @@
+---
+title: Bookings & Blocks
+description: Existing commitments that consume availability
+---
+
+# Bookings & Blocks
+
+The engine needs to know about existing commitments to compute remaining availability. There are two types: **bookings** (appointments in your system) and **blocks** (external busy time).
+
+## Bookings
+
+A booking is an existing appointment in your system:
+
+```typescript
+interface Booking {
+  id?: string;           // Optional identifier
+  hostId: string;        // Which host is booked
+  start: Date;           // Start time (UTC)
+  end: Date;             // End time (UTC)
+  eventTypeId?: string;  // Which event type (for cap counting)
+}
+```
+
+### Basic Usage
+
+```typescript
+const existingBookings: Booking[] = [
+  {
+    id: 'booking-123',
+    hostId: 'dr-smith',
+    start: new Date('2024-01-15T14:00:00Z'),
+    end: new Date('2024-01-15T15:00:00Z'),
+    eventTypeId: 'consultation',
+  },
+  {
+    hostId: 'dr-smith',
+    start: new Date('2024-01-15T16:00:00Z'),
+    end: new Date('2024-01-15T16:30:00Z'),
+    eventTypeId: 'follow-up',
+  },
+];
+```
+
+### Why `eventTypeId` Matters
+
+The `eventTypeId` field serves two purposes:
+
+1. **Capacity counting**: When computing `maxPerDay` / `maxPerWeek`, only bookings with the matching event type are counted.
+
+2. **Buffer lookup**: Each booking is inflated by its own event type's buffers. Pass the `eventTypes` map to tell the engine what buffers apply:
+
+```typescript
+const slots = getAvailableSlots({
+  eventType: followUp,
+  hosts: [drSmith],
+  bookings: existingBookings,
+  range: queryRange,
+
+  // Buffer config for existing bookings
+  eventTypes: {
+    'consultation': { bufferBefore: 15 * 60 * 1000, bufferAfter: 15 * 60 * 1000 },
+    'follow-up': { bufferAfter: 5 * 60 * 1000 },
+  },
+});
+```
+
+<Note>
+If a booking's `eventTypeId` isn't in the `eventTypes` map, its buffers are assumed to be zero.
+</Note>
+
+## Blocks
+
+A block is any external busy time that isn't a booking in your system:
+
+```typescript
+interface Block {
+  hostId: string;  // Which host is busy
+  start: Date;     // Start time (UTC)
+  end: Date;       // End time (UTC)
+}
+```
+
+Blocks come from:
+- Google Calendar events
+- Outlook calendar events
+- Manually marked "busy" time
+- Lunch breaks
+- PTO that isn't in your schedule overrides
+
+### Example
+
+```typescript
+const externalBlocks: Block[] = [
+  // Lunch meeting from Google Calendar
+  {
+    hostId: 'dr-smith',
+    start: new Date('2024-01-15T17:00:00Z'),
+    end: new Date('2024-01-15T18:00:00Z'),
+  },
+  // Conference call
+  {
+    hostId: 'dr-smith',
+    start: new Date('2024-01-16T19:00:00Z'),
+    end: new Date('2024-01-16T20:00:00Z'),
+  },
+];
+
+const slots = getAvailableSlots({
+  eventType: consultation,
+  hosts: [drSmith],
+  bookings: existingBookings,
+  blocks: externalBlocks,  // Pass blocks here
+  range: queryRange,
+});
+```
+
+### Blocks vs Schedule Overrides
+
+Both can remove availability, but they're different:
+
+| | Blocks | Schedule Overrides |
+|---|--------|-------------------|
+| **Source** | External calendars, ad-hoc | Part of the schedule definition |
+| **Scope** | Single occurrence | Repeatable (can be added to schedule) |
+| **When to use** | Dynamic external events | Planned time off, holidays |
+
+**Use schedule overrides** for:
+- Holidays (Christmas, Thanksgiving)
+- Planned vacation
+- Regular recurring blocked time
+
+**Use blocks** for:
+- Google Calendar integration
+- One-off conflicts
+- Events that change frequently
+
+## Fetching Bookings from Your Database
+
+The engine doesn't care how you get bookings—that's your responsibility. A typical pattern:
+
+```typescript
+async function getAvailability(hostIds: string[], range: DateRange) {
+  // Fetch from your database
+  const bookings = await db.bookings.findMany({
+    where: {
+      hostId: { in: hostIds },
+      start: { gte: range.start },
+      end: { lte: range.end },
+      status: { not: 'cancelled' },
+    },
+  });
+
+  // Transform to engine format
+  const engineBookings: Booking[] = bookings.map(b => ({
+    id: b.id,
+    hostId: b.hostId,
+    start: b.startTime,
+    end: b.endTime,
+    eventTypeId: b.appointmentTypeId,
+  }));
+
+  return getAvailableSlots({
+    eventType: consultation,
+    hosts: hosts,
+    bookings: engineBookings,
+    range: range,
+  });
+}
+```
+
+## Fetching Blocks from Google Calendar
+
+Use the `buildBlocksFromFreebusy` helper to convert Google Calendar's freebusy response:
+
+```typescript
+import { buildBlocksFromFreebusy } from '@courierkit/availability';
+import { google } from 'googleapis';
+
+async function getCalendarBlocks(
+  hostId: string,
+  calendarId: string,
+  range: DateRange
+): Promise<Block[]> {
+  const calendar = google.calendar({ version: 'v3', auth: authClient });
+
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: range.start.toISOString(),
+      timeMax: range.end.toISOString(),
+      items: [{ id: calendarId }],
+    },
+  });
+
+  return buildBlocksFromFreebusy(response.data, hostId);
+}
+```
+
+See the [Google Calendar Integration](/examples/google-calendar-integration) example for a complete implementation.
+
+## Combining Multiple Sources
+
+In a real application, you'll combine bookings and blocks from multiple sources:
+
+```typescript
+async function computeAvailability(
+  hosts: HostSchedules[],
+  eventType: EventType,
+  range: DateRange
+) {
+  const hostIds = hosts.map(h => h.hostId);
+
+  // Fetch in parallel
+  const [dbBookings, googleBlocks, outlookBlocks] = await Promise.all([
+    fetchBookingsFromDatabase(hostIds, range),
+    fetchGoogleCalendarBlocks(hostIds, range),
+    fetchOutlookCalendarBlocks(hostIds, range),
+  ]);
+
+  // Combine all blocks
+  const allBlocks = [...googleBlocks, ...outlookBlocks];
+
+  return getAvailableSlots({
+    eventType,
+    hosts,
+    bookings: dbBookings,
+    blocks: allBlocks,
+    range,
+    eventTypes: eventTypeBufferConfig,
+  });
+}
+```
+
+## Performance Considerations
+
+<Tip>
+Only fetch bookings and blocks that overlap with your query range. Fetching a year's worth of bookings when you only need next week's availability wastes database queries and processing time.
+</Tip>
+
+```typescript
+// Good: Fetch only what you need
+const bookings = await db.bookings.findMany({
+  where: {
+    hostId: { in: hostIds },
+    start: { lt: range.end },
+    end: { gt: range.start },
+  },
+});
+
+// Bad: Fetching everything
+const bookings = await db.bookings.findMany({
+  where: { hostId: { in: hostIds } },
+});
+```

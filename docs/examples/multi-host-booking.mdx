@@ -1,0 +1,545 @@
+---
+title: Multi-Host Booking
+description: Finding availability across multiple resources simultaneously
+---
+
+# Multi-Host Booking
+
+This example covers scenarios where you need to coordinate availability across multiple people or resources—team meetings, rooms with equipment, or appointments requiring multiple staff members.
+
+## Scenario 1: "Any Available" (Default Behavior)
+
+The default `getAvailableSlots` behavior returns slots where **any** host is free. This is perfect for:
+- Booking with any available doctor
+- Reserving any conference room
+- Scheduling with any support agent
+
+```typescript
+import { getAvailableSlots, type HostSchedules, type EventType } from '@courierkit/availability';
+
+const conferenceRooms: HostSchedules[] = [
+  {
+    hostId: 'room-a',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '08:00',
+          endTime: '18:00',
+          timezone: 'America/New_York',
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'room-b',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '08:00',
+          endTime: '18:00',
+          timezone: 'America/New_York',
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'room-c', // VIP room with limited hours
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'wednesday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/New_York',
+        }],
+      },
+    },
+  },
+];
+
+const oneHourMeeting: EventType = {
+  id: 'meeting-1hr',
+  length: 60 * 60 * 1000,
+  bufferAfter: 15 * 60 * 1000, // Cleanup time
+};
+
+// Find any available room
+const slots = getAvailableSlots({
+  eventType: oneHourMeeting,
+  hosts: conferenceRooms,
+  bookings: existingRoomBookings,
+  range: thisWeek,
+});
+
+// Result includes slots for all rooms, sorted by time
+// Pick the first available slot regardless of which room
+const firstAvailable = slots[0];
+console.log(`Book ${firstAvailable.hostId} at ${firstAvailable.start}`);
+```
+
+### Grouping by Time (Pick Any Room)
+
+Often you want to show time slots with any available room:
+
+```typescript
+interface TimeSlot {
+  start: Date;
+  end: Date;
+  availableRooms: string[];
+}
+
+function groupByTime(slots: Slot[]): TimeSlot[] {
+  const timeMap = new Map<string, TimeSlot>();
+
+  for (const slot of slots) {
+    const key = slot.start.toISOString();
+
+    if (!timeMap.has(key)) {
+      timeMap.set(key, {
+        start: slot.start,
+        end: slot.end,
+        availableRooms: [],
+      });
+    }
+
+    timeMap.get(key)!.availableRooms.push(slot.hostId);
+  }
+
+  return Array.from(timeMap.values());
+}
+
+const timeSlots = groupByTime(slots);
+// [
+//   { start: 9:00, end: 10:00, availableRooms: ['room-a', 'room-b', 'room-c'] },
+//   { start: 10:00, end: 11:00, availableRooms: ['room-a', 'room-c'] },
+//   ...
+// ]
+```
+
+## Scenario 2: "All Must Be Free"
+
+For team meetings or procedures requiring multiple people, everyone must be available. Use `intersectIntervals`:
+
+```typescript
+import {
+  getAvailableSlots,
+  intersectIntervals,
+  type Slot,
+  type Interval,
+} from '@courierkit/availability';
+
+const teamMembers: HostSchedules[] = [
+  {
+    hostId: 'alice',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/Los_Angeles',
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'bob',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '10:00',
+          endTime: '18:00',
+          timezone: 'America/Los_Angeles',
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'carol',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'wednesday', 'friday'],
+          startTime: '08:00',
+          endTime: '16:00',
+          timezone: 'America/Los_Angeles',
+        }],
+      },
+    },
+  },
+];
+
+function findTeamAvailability(
+  members: HostSchedules[],
+  eventType: EventType,
+  allBookings: Booking[],
+  range: DateRange
+): Slot[] {
+  // Get slots for each member individually
+  const memberSlots = members.map(member => {
+    const memberBookings = allBookings.filter(b => b.hostId === member.hostId);
+    return getAvailableSlots({
+      eventType,
+      hosts: [member],
+      bookings: memberBookings,
+      range,
+    });
+  });
+
+  // Convert to intervals for intersection
+  const memberIntervals = memberSlots.map(slots =>
+    slots.map(s => ({ start: s.start, end: s.end }))
+  );
+
+  // Find common availability using intersection
+  let commonIntervals: Interval[] = memberIntervals[0] ?? [];
+  for (let i = 1; i < memberIntervals.length; i++) {
+    commonIntervals = intersectIntervals(commonIntervals, memberIntervals[i]);
+  }
+
+  // Convert back to slots (use combined hostId or "team")
+  const teamId = members.map(m => m.hostId).join('+');
+  return commonIntervals.map(interval => ({
+    hostId: teamId,
+    start: interval.start,
+    end: interval.end,
+  }));
+}
+
+// Usage
+const teamMeeting: EventType = {
+  id: 'team-meeting',
+  length: 60 * 60 * 1000, // 1 hour
+  slotInterval: 30 * 60 * 1000,
+};
+
+const teamSlots = findTeamAvailability(
+  teamMembers,
+  teamMeeting,
+  allBookings,
+  { start: new Date('2024-01-15'), end: new Date('2024-01-22') }
+);
+
+console.log(`Found ${teamSlots.length} slots when all team members are free`);
+```
+
+## Scenario 3: Cross-Timezone Team Scheduling
+
+When team members are in different timezones, the engine handles it correctly because everything is UTC internally:
+
+```typescript
+const distributedTeam: HostSchedules[] = [
+  {
+    hostId: 'new-york-alice',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/New_York', // EST/EDT
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'london-bob',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'Europe/London', // GMT/BST
+        }],
+      },
+    },
+  },
+  {
+    hostId: 'tokyo-carol',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'Asia/Tokyo', // JST
+        }],
+      },
+    },
+  },
+];
+
+// Find times when all three can meet
+const globalTeamSlots = findTeamAvailability(
+  distributedTeam,
+  teamMeeting,
+  [],
+  thisWeek
+);
+
+// Display in each member's local time
+function displayInAllTimezones(slot: Slot) {
+  const timezones = ['America/New_York', 'Europe/London', 'Asia/Tokyo'];
+
+  console.log('Meeting time:');
+  for (const tz of timezones) {
+    const localTime = slot.start.toLocaleString('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
+    console.log(`  ${tz}: ${localTime}`);
+  }
+}
+
+// Output:
+// Meeting time:
+//   America/New_York: Mon 8:00 AM EST
+//   Europe/London: Mon 1:00 PM GMT
+//   Asia/Tokyo: Mon 10:00 PM JST
+```
+
+## Scenario 4: Resource + Person Combination
+
+Some appointments require both a person AND a resource (e.g., doctor + procedure room, instructor + classroom):
+
+```typescript
+// Define people
+const surgeons: HostSchedules[] = [
+  { hostId: 'dr-smith', schedules: { default: surgeonSchedule } },
+  { hostId: 'dr-jones', schedules: { default: surgeonSchedule } },
+];
+
+// Define operating rooms
+const operatingRooms: HostSchedules[] = [
+  { hostId: 'or-1', schedules: { default: orSchedule } },
+  { hostId: 'or-2', schedules: { default: orSchedule } },
+];
+
+interface SurgerySlot {
+  surgeon: string;
+  room: string;
+  start: Date;
+  end: Date;
+}
+
+async function findSurgerySlots(
+  eventType: EventType,
+  bookings: Booking[],
+  range: DateRange
+): Promise<SurgerySlot[]> {
+  const surgerySlots: SurgerySlot[] = [];
+
+  // Get available slots for each surgeon
+  for (const surgeon of surgeons) {
+    const surgeonBookings = bookings.filter(b => b.hostId === surgeon.hostId);
+    const surgeonSlots = getAvailableSlots({
+      eventType,
+      hosts: [surgeon],
+      bookings: surgeonBookings,
+      range,
+    });
+
+    // For each surgeon slot, check if any OR is available
+    for (const slot of surgeonSlots) {
+      // Get OR availability at this exact time
+      const roomBookings = bookings.filter(b =>
+        operatingRooms.some(r => r.hostId === b.hostId)
+      );
+
+      const roomSlots = getAvailableSlots({
+        eventType,
+        hosts: operatingRooms,
+        bookings: roomBookings,
+        range: { start: slot.start, end: slot.end },
+      });
+
+      // Find rooms available at this exact time
+      const availableRooms = roomSlots.filter(
+        rs => rs.start.getTime() === slot.start.getTime()
+      );
+
+      if (availableRooms.length > 0) {
+        surgerySlots.push({
+          surgeon: surgeon.hostId,
+          room: availableRooms[0].hostId, // Pick first available room
+          start: slot.start,
+          end: slot.end,
+        });
+      }
+    }
+  }
+
+  // Sort by time
+  surgerySlots.sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  return surgerySlots;
+}
+
+// Usage
+const surgeryEvent: EventType = {
+  id: 'surgery',
+  length: 2 * 60 * 60 * 1000, // 2 hours
+  bufferBefore: 30 * 60 * 1000, // Prep
+  bufferAfter: 30 * 60 * 1000, // Cleanup
+  maxPerDay: 3,
+};
+
+const surgerySlots = await findSurgerySlots(surgeryEvent, allBookings, nextWeek);
+// Result:
+// [
+//   { surgeon: 'dr-smith', room: 'or-1', start: Mon 8:00, end: Mon 10:00 },
+//   { surgeon: 'dr-jones', room: 'or-2', start: Mon 8:00, end: Mon 10:00 },
+//   ...
+// ]
+```
+
+## Scenario 5: Round-Robin Assignment
+
+Distribute bookings evenly across hosts:
+
+```typescript
+interface RoundRobinResult {
+  slot: Slot;
+  priority: number; // Lower = should be booked first for even distribution
+}
+
+function getRoundRobinSlots(
+  hosts: HostSchedules[],
+  eventType: EventType,
+  bookings: Booking[],
+  range: DateRange
+): RoundRobinResult[] {
+  // Count existing bookings per host
+  const bookingCounts = new Map<string, number>();
+  for (const host of hosts) {
+    const hostBookingCount = bookings.filter(
+      b => b.hostId === host.hostId && b.eventTypeId === eventType.id
+    ).length;
+    bookingCounts.set(host.hostId, hostBookingCount);
+  }
+
+  // Get all available slots
+  const allSlots = getAvailableSlots({
+    eventType,
+    hosts,
+    bookings,
+    range,
+  });
+
+  // Assign priority based on current booking count
+  // Hosts with fewer bookings get higher priority (lower number)
+  const results: RoundRobinResult[] = allSlots.map(slot => ({
+    slot,
+    priority: bookingCounts.get(slot.hostId) ?? 0,
+  }));
+
+  // Sort by time first, then by priority (fewer bookings = higher priority)
+  results.sort((a, b) => {
+    const timeDiff = a.slot.start.getTime() - b.slot.start.getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return a.priority - b.priority;
+  });
+
+  return results;
+}
+
+// Usage: Show slots with load-balanced host suggestions
+const roundRobinSlots = getRoundRobinSlots(
+  supportAgents,
+  supportCall,
+  existingBookings,
+  thisWeek
+);
+
+// Group by time, showing recommended host first
+const slotsByTime = new Map<string, RoundRobinResult[]>();
+for (const result of roundRobinSlots) {
+  const timeKey = result.slot.start.toISOString();
+  if (!slotsByTime.has(timeKey)) {
+    slotsByTime.set(timeKey, []);
+  }
+  slotsByTime.get(timeKey)!.push(result);
+}
+
+// For each time slot, hosts are ordered by who should be booked next
+for (const [time, results] of slotsByTime) {
+  console.log(`${time}:`);
+  results
+    .sort((a, b) => a.priority - b.priority)
+    .forEach((r, i) => {
+      const marker = i === 0 ? '★' : ' ';
+      console.log(`  ${marker} ${r.slot.hostId} (${r.priority} existing bookings)`);
+    });
+}
+```
+
+## Scenario 6: Weighted Preferences
+
+Prefer certain hosts over others (e.g., preferred doctor, primary room):
+
+```typescript
+interface WeightedSlot extends Slot {
+  weight: number;
+}
+
+function getWeightedSlots(
+  hosts: HostSchedules[],
+  hostWeights: Record<string, number>, // Higher = preferred
+  eventType: EventType,
+  bookings: Booking[],
+  range: DateRange
+): WeightedSlot[] {
+  const slots = getAvailableSlots({
+    eventType,
+    hosts,
+    bookings,
+    range,
+  });
+
+  return slots
+    .map(slot => ({
+      ...slot,
+      weight: hostWeights[slot.hostId] ?? 0,
+    }))
+    .sort((a, b) => {
+      // Sort by time first
+      const timeDiff = a.start.getTime() - b.start.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      // Then by weight (higher weight = preferred)
+      return b.weight - a.weight;
+    });
+}
+
+// Usage: Patient prefers Dr. Chen, will accept Dr. Williams
+const patientPreferences: Record<string, number> = {
+  'dr-chen': 10,     // Strongly preferred
+  'dr-williams': 5,  // Acceptable
+  'dr-rodriguez': 1, // Last resort
+};
+
+const preferredSlots = getWeightedSlots(
+  allDoctors,
+  patientPreferences,
+  followUpVisit,
+  bookings,
+  nextTwoWeeks
+);
+
+// First slot at each time will be with preferred doctor if available
+```

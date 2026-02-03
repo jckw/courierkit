@@ -1,0 +1,8 @@
+<svg width="120" height="30" viewBox="0 0 120 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="2" y="5" width="20" height="20" rx="4" fill="#07C983"/>
+  <rect x="6" y="9" width="5" height="5" rx="1" fill="white"/>
+  <rect x="13" y="9" width="5" height="5" rx="1" fill="white"/>
+  <rect x="6" y="16" width="5" height="5" rx="1" fill="white"/>
+  <rect x="13" y="16" width="5" height="5" rx="1" fill="white" fill-opacity="0.5"/>
+  <text x="28" y="20" fill="white" font-family="system-ui, sans-serif" font-size="14" font-weight="600">availability</text>
+</svg>

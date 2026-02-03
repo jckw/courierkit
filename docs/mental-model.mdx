@@ -1,0 +1,181 @@
+---
+title: Mental Model
+description: Understanding how the slot engine thinks about time
+---
+
+# Mental Model
+
+Before diving into the API, it helps to understand how the slot engine approaches availability computation.
+
+## Everything is an Interval
+
+The fundamental primitive is an **interval**—a half-open time range `[start, end)` where the start is inclusive and the end is exclusive.
+
+```typescript
+interface Interval {
+  start: Date;  // inclusive
+  end: Date;    // exclusive
+}
+```
+
+Half-open intervals are elegant because they:
+- Never double-count boundaries (10:00-11:00 and 11:00-12:00 don't overlap)
+- Make duration calculation trivial: `end - start`
+- Compose cleanly with set operations
+
+## The Layering Process
+
+The engine computes availability by layering intervals:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ 1. Base Schedule                                              │
+│    ████████████████████████████████████████████████          │
+│    (Mon-Fri 9am-5pm in America/New_York)                     │
+├──────────────────────────────────────────────────────────────┤
+│ 2. Minus Existing Bookings (with buffer inflation)           │
+│    ████████████████████████     ████████████████████         │
+│                          ▓▓▓▓▓▓▓                              │
+│                          ^booking + buffers                   │
+├──────────────────────────────────────────────────────────────┤
+│ 3. Minus External Calendar Blocks                            │
+│    ████████████████████████     ██████      ████████         │
+│                                       ^^^^^^                  │
+│                                       (Google Calendar event) │
+├──────────────────────────────────────────────────────────────┤
+│ 4. Minus Minimum Notice Window                               │
+│    ░░░░░░░░████████████████     ██████      ████████         │
+│    ^^^^^^^^                                                   │
+│    (too soon to book)                                         │
+├──────────────────────────────────────────────────────────────┤
+│ 5. Generate Slots on Grid                                    │
+│           ⬜⬜⬜⬜⬜⬜⬜⬜        ⬜⬜        ⬜⬜⬜⬜          │
+│           (30-min slots snapped to grid)                      │
+├──────────────────────────────────────────────────────────────┤
+│ 6. Apply Daily/Weekly Caps                                   │
+│           ⬜⬜⬜⬜⬜⬜            ⬜⬜        ⬜⬜            │
+│                    ^^                        ^^^^             │
+│                    (day at max capacity)                      │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Key Concepts
+
+### Hosts
+
+A **host** is anything that can be booked—a person, a room, a piece of equipment. The engine doesn't care what a host represents; it just needs:
+
+- A unique ID
+- One or more named schedules
+
+```typescript
+const conferenceRoom: HostSchedules = {
+  hostId: 'room-a',
+  schedules: {
+    default: { /* ... */ }
+  }
+};
+
+const drSmith: HostSchedules = {
+  hostId: 'dr-smith-123',
+  schedules: {
+    default: { /* office hours */ },
+    telehealth: { /* extended virtual hours */ }
+  }
+};
+```
+
+### Schedules
+
+A **schedule** defines recurring windows of base availability. Schedules are defined in **local time** because that's how humans think ("I work 9-5 Eastern"), but the engine converts everything to UTC internally.
+
+```typescript
+const schedule: Schedule = {
+  id: 'default',
+  rules: [
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '09:00',
+      endTime: '17:00',
+      timezone: 'America/New_York',
+    }
+  ],
+  overrides: [
+    { date: '2024-12-25', available: false },  // Christmas off
+  ]
+};
+```
+
+### Event Types
+
+An **event type** is what's being booked, along with its constraints:
+
+```typescript
+const consultation: EventType = {
+  id: 'initial-consult',
+  length: 60 * 60 * 1000,        // 1 hour
+  bufferBefore: 15 * 60 * 1000,  // 15 min prep
+  bufferAfter: 15 * 60 * 1000,   // 15 min notes
+  minimumNotice: 24 * 60 * 60 * 1000,  // 24 hours
+  maxPerDay: 4,
+};
+```
+
+### Buffer Inflation
+
+When a booking exists, its **buffer zones** are inflated around it. A 1-hour appointment with 15-minute buffers actually blocks 1.5 hours:
+
+```
+                    ┌─────────────────┐
+                    │   15 min buffer │ (blocked for prep)
+                    ├─────────────────┤
+                    │                 │
+                    │   60 min appt   │ (the actual booking)
+                    │                 │
+                    ├─────────────────┤
+                    │   15 min buffer │ (blocked for notes)
+                    └─────────────────┘
+```
+
+Crucially, **each booking's buffers come from its own event type**, not the event type being queried. This means a 30-minute follow-up (with no buffer) and a 60-minute initial consultation (with 15-minute buffers) block different amounts of time, even when computing availability for the same query.
+
+### Slot Generation
+
+After subtracting all blocked time, the engine walks through remaining free intervals and places slots at regular intervals:
+
+```
+Free interval: ═══════════════════════════════════════
+                |     |     |     |     |     |
+Slot grid:      ⬜    ⬜    ⬜    ⬜    ⬜    ⬜
+                └──┬──┘
+                   └── slotInterval (e.g., 30 min)
+```
+
+The `slotInterval` controls the grid. If your event is 50 minutes but you want hourly start times, set `slotInterval: 60 * 60 * 1000`.
+
+## Statelessness
+
+The engine is completely stateless. It:
+
+- Never touches a network
+- Never reads from a database
+- Never caches results
+- Has no side effects
+
+You fetch data from your sources (database, Google Calendar, etc.), pass it in, and get slots back. This makes the engine:
+
+- **Predictable**: Same inputs always produce same outputs
+- **Testable**: No mocking required
+- **Flexible**: Works with any data source
+
+## What's Not Included
+
+The engine intentionally stays focused. It doesn't handle:
+
+- **Persistence**: Store bookings in your own database
+- **Authentication**: Protect your booking endpoints yourself
+- **Calendar sync**: Use the freebusy helper, but write-back is your responsibility
+- **UI components**: Bring your own date picker
+- **Round-robin assignment**: Compute per-host, then pick the host you want
+
+This keeps the library small and lets you own the pieces that need to integrate with your specific stack.

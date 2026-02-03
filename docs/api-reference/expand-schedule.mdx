@@ -1,0 +1,241 @@
+---
+title: expandSchedule
+description: Convert a schedule's rules and overrides into UTC intervals
+---
+
+# expandSchedule
+
+Expands a schedule definition into concrete UTC intervals for a given date range. This is the function used internally by `getAvailableSlots`, but it's also exported for custom use cases.
+
+## Signature
+
+```typescript
+function expandSchedule(schedule: Schedule, range: DateRange): Interval[]
+```
+
+## Parameters
+
+<ParamField path="schedule" type="Schedule" required>
+  The schedule containing rules and optional overrides.
+</ParamField>
+
+<ParamField path="range" type="DateRange" required>
+  The date range to expand the schedule for.
+</ParamField>
+
+## Returns
+
+`Interval[]` — An array of UTC intervals representing when the schedule is available, sorted by start time.
+
+## How It Works
+
+1. **Iterate days**: Walks through each day in the range
+2. **Match rules**: For each day, finds rules where:
+   - The day of week matches (in the rule's timezone)
+   - The rule is within its effective date range (if specified)
+3. **Convert to UTC**: Converts local times to UTC intervals
+4. **Apply overrides**: Removes or adds time based on overrides
+5. **Merge and clip**: Merges overlapping intervals and clips to the range
+
+## Examples
+
+### Basic Usage
+
+```typescript
+import { expandSchedule } from '@courierkit/availability';
+
+const schedule = {
+  id: 'default',
+  rules: [{
+    days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    startTime: '09:00',
+    endTime: '17:00',
+    timezone: 'America/New_York',
+  }],
+};
+
+const intervals = expandSchedule(schedule, {
+  start: new Date('2024-01-15T00:00:00Z'),  // Monday
+  end: new Date('2024-01-22T00:00:00Z'),    // Following Monday
+});
+
+// Returns 5 intervals (Mon-Fri), each 9am-5pm ET in UTC
+// [
+//   { start: 2024-01-15T14:00:00Z, end: 2024-01-15T22:00:00Z },  // Mon
+//   { start: 2024-01-16T14:00:00Z, end: 2024-01-16T22:00:00Z },  // Tue
+//   { start: 2024-01-17T14:00:00Z, end: 2024-01-17T22:00:00Z },  // Wed
+//   { start: 2024-01-18T14:00:00Z, end: 2024-01-18T22:00:00Z },  // Thu
+//   { start: 2024-01-19T14:00:00Z, end: 2024-01-19T22:00:00Z },  // Fri
+// ]
+```
+
+### With Overrides
+
+```typescript
+const schedule = {
+  id: 'default',
+  rules: [{
+    days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+    startTime: '09:00',
+    endTime: '17:00',
+    timezone: 'America/New_York',
+  }],
+  overrides: [
+    // Wednesday off
+    { date: '2024-01-17', available: false },
+    // Special Saturday hours
+    { date: '2024-01-20', available: true, startTime: '10:00', endTime: '14:00' },
+  ],
+};
+
+const intervals = expandSchedule(schedule, {
+  start: new Date('2024-01-15T00:00:00Z'),
+  end: new Date('2024-01-22T00:00:00Z'),
+});
+
+// Returns 5 intervals: Mon, Tue, Thu, Fri (normal) + Sat (special)
+// Wednesday is removed, Saturday is added
+```
+
+### Multiple Rules (Split Day)
+
+```typescript
+const schedule = {
+  id: 'with-lunch',
+  rules: [
+    // Morning block
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '09:00',
+      endTime: '12:00',
+      timezone: 'America/New_York',
+    },
+    // Afternoon block (after lunch)
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '13:00',
+      endTime: '17:00',
+      timezone: 'America/New_York',
+    },
+  ],
+};
+
+const intervals = expandSchedule(schedule, {
+  start: new Date('2024-01-15T00:00:00Z'),
+  end: new Date('2024-01-16T00:00:00Z'),  // Just Monday
+});
+
+// Returns 2 intervals for Monday:
+// [
+//   { start: 2024-01-15T14:00:00Z, end: 2024-01-15T17:00:00Z },  // 9am-12pm
+//   { start: 2024-01-15T18:00:00Z, end: 2024-01-15T22:00:00Z },  // 1pm-5pm
+// ]
+```
+
+### Time-Limited Rules
+
+```typescript
+const schedule = {
+  id: 'seasonal',
+  rules: [
+    // Winter hours
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '09:00',
+      endTime: '16:00',
+      timezone: 'America/New_York',
+      effectiveUntil: '2024-03-01',
+    },
+    // Summer hours
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '08:00',
+      endTime: '18:00',
+      timezone: 'America/New_York',
+      effectiveFrom: '2024-03-01',
+    },
+  ],
+};
+
+// Query in February = winter hours
+const winterIntervals = expandSchedule(schedule, {
+  start: new Date('2024-02-15T00:00:00Z'),
+  end: new Date('2024-02-22T00:00:00Z'),
+});
+
+// Query in April = summer hours
+const summerIntervals = expandSchedule(schedule, {
+  start: new Date('2024-04-15T00:00:00Z'),
+  end: new Date('2024-04-22T00:00:00Z'),
+});
+```
+
+## Use Cases
+
+### Debugging Schedule Configuration
+
+```typescript
+// See what intervals a schedule produces
+const intervals = expandSchedule(mySchedule, thisWeek);
+console.log('Schedule produces these intervals:');
+for (const interval of intervals) {
+  console.log(`  ${interval.start.toISOString()} - ${interval.end.toISOString()}`);
+}
+```
+
+### Building a Calendar View
+
+```typescript
+// Get availability for calendar display
+const availability = expandSchedule(schedule, thisMonth);
+
+// Group by date for calendar rendering
+const byDate = new Map<string, Interval[]>();
+for (const interval of availability) {
+  const dateKey = interval.start.toISOString().split('T')[0];
+  if (!byDate.has(dateKey)) {
+    byDate.set(dateKey, []);
+  }
+  byDate.get(dateKey)!.push(interval);
+}
+```
+
+### Custom Availability Logic
+
+```typescript
+import { expandSchedule, subtractIntervals } from '@courierkit/availability';
+
+// Get base availability
+const baseAvailability = expandSchedule(schedule, range);
+
+// Apply custom blocks (e.g., manually marked busy time)
+const customBlocks = getCustomBlocksFromDatabase(hostId, range);
+const adjustedAvailability = subtractIntervals(baseAvailability, customBlocks);
+
+// Do something with adjusted availability
+```
+
+## DST Handling
+
+The function correctly handles Daylight Saving Time transitions:
+
+```typescript
+const schedule = {
+  id: 'default',
+  rules: [{
+    days: ['sunday'],
+    startTime: '02:00',  // Right when DST changes
+    endTime: '04:00',
+    timezone: 'America/New_York',
+  }],
+};
+
+// March 10, 2024 is when DST "springs forward" in US
+const intervals = expandSchedule(schedule, {
+  start: new Date('2024-03-10T00:00:00Z'),
+  end: new Date('2024-03-11T00:00:00Z'),
+});
+
+// The 2am-4am window is correctly converted despite DST
+// (2am local becomes 3am, so the interval is shorter on this day)
+```

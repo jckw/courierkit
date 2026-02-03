@@ -1,0 +1,256 @@
+---
+title: Quickstart
+description: Get up and running with slot generation in 5 minutes
+---
+
+# Quickstart
+
+This guide walks through building availability for a realistic booking scenario: a therapy practice where clients can book 50-minute sessions with therapists who have different schedules.
+
+## Step 1: Install the Package
+
+<CodeGroup>
+```bash npm
+npm install @courierkit/availability
+```
+
+```bash yarn
+yarn add @courierkit/availability
+```
+</CodeGroup>
+
+## Step 2: Define a Schedule
+
+A schedule defines when a host (therapist, room, equipment) is available. Schedules consist of recurring rules and optional overrides for specific dates.
+
+```typescript
+import type { HostSchedules } from '@courierkit/availability';
+
+const drJohnson: HostSchedules = {
+  hostId: 'therapist-johnson',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        {
+          // Monday, Wednesday, Friday: 9am - 5pm
+          days: ['monday', 'wednesday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/Chicago',
+        },
+        {
+          // Tuesday, Thursday: 12pm - 8pm (evening hours)
+          days: ['tuesday', 'thursday'],
+          startTime: '12:00',
+          endTime: '20:00',
+          timezone: 'America/Chicago',
+        },
+      ],
+      overrides: [
+        // Taking Christmas week off
+        { date: '2024-12-23', available: false },
+        { date: '2024-12-24', available: false },
+        { date: '2024-12-25', available: false },
+        { date: '2024-12-26', available: false },
+        { date: '2024-12-27', available: false },
+        // Working a special Saturday
+        { date: '2024-01-20', available: true, startTime: '10:00', endTime: '14:00' },
+      ],
+    },
+  },
+};
+```
+
+## Step 3: Define an Event Type
+
+Event types describe what's being booked and carry scheduling constraints:
+
+```typescript
+import type { EventType } from '@courierkit/availability';
+
+const therapySession: EventType = {
+  id: 'therapy-session',
+  length: 50 * 60 * 1000, // 50 minutes
+
+  // 10 minutes between sessions for notes and transition
+  bufferAfter: 10 * 60 * 1000,
+
+  // Snap to hourly slots (session at :00, buffer until :00)
+  slotInterval: 60 * 60 * 1000,
+
+  // Require 24 hours notice for booking
+  minimumNotice: 24 * 60 * 60 * 1000,
+
+  // Only show availability 2 weeks out
+  maximumLeadTime: 14 * 24 * 60 * 60 * 1000,
+
+  // Limit to 6 sessions per day per therapist
+  maxPerDay: 6,
+};
+```
+
+## Step 4: Add Existing Bookings
+
+Include any existing appointments that should block time:
+
+```typescript
+import type { Booking } from '@courierkit/availability';
+
+const existingBookings: Booking[] = [
+  {
+    hostId: 'therapist-johnson',
+    start: new Date('2024-01-15T15:00:00Z'), // 9am Chicago
+    end: new Date('2024-01-15T15:50:00Z'),
+    eventTypeId: 'therapy-session',
+  },
+  {
+    hostId: 'therapist-johnson',
+    start: new Date('2024-01-15T17:00:00Z'), // 11am Chicago
+    end: new Date('2024-01-15T17:50:00Z'),
+    eventTypeId: 'therapy-session',
+  },
+];
+```
+
+## Step 5: Get Available Slots
+
+Now compute what's available:
+
+```typescript
+import { getAvailableSlots } from '@courierkit/availability';
+
+const slots = getAvailableSlots({
+  eventType: therapySession,
+  hosts: [drJohnson],
+  bookings: existingBookings,
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+});
+
+// slots is an array of available time slots:
+// [
+//   { hostId: 'therapist-johnson', start: 2024-01-15T16:00:00Z, end: 2024-01-15T16:50:00Z },
+//   { hostId: 'therapist-johnson', start: 2024-01-15T18:00:00Z, end: 2024-01-15T18:50:00Z },
+//   ...
+// ]
+```
+
+## Step 6: Display to Users
+
+The slots are returned in UTC. Convert to the user's timezone for display:
+
+```typescript
+function formatSlotForUser(slot: Slot, userTimezone: string): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: userTimezone,
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return formatter.format(slot.start);
+}
+
+// Display available slots
+slots.forEach(slot => {
+  console.log(formatSlotForUser(slot, 'America/New_York'));
+});
+
+// Output:
+// Mon, Jan 15, 11:00 AM
+// Mon, Jan 15, 1:00 PM
+// ...
+```
+
+## Complete Example
+
+Here's the full working code:
+
+```typescript
+import {
+  getAvailableSlots,
+  type EventType,
+  type HostSchedules,
+  type Booking,
+  type Slot,
+} from '@courierkit/availability';
+
+// 1. Define the therapist's schedule
+const drJohnson: HostSchedules = {
+  hostId: 'therapist-johnson',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [
+        {
+          days: ['monday', 'wednesday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/Chicago',
+        },
+        {
+          days: ['tuesday', 'thursday'],
+          startTime: '12:00',
+          endTime: '20:00',
+          timezone: 'America/Chicago',
+        },
+      ],
+    },
+  },
+};
+
+// 2. Define the session type
+const therapySession: EventType = {
+  id: 'therapy-session',
+  length: 50 * 60 * 1000,
+  bufferAfter: 10 * 60 * 1000,
+  slotInterval: 60 * 60 * 1000,
+  minimumNotice: 24 * 60 * 60 * 1000,
+  maxPerDay: 6,
+};
+
+// 3. Fetch existing bookings from your database
+const existingBookings: Booking[] = [
+  {
+    hostId: 'therapist-johnson',
+    start: new Date('2024-01-15T15:00:00Z'),
+    end: new Date('2024-01-15T15:50:00Z'),
+    eventTypeId: 'therapy-session',
+  },
+];
+
+// 4. Compute available slots
+const availableSlots = getAvailableSlots({
+  eventType: therapySession,
+  hosts: [drJohnson],
+  bookings: existingBookings,
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+});
+
+console.log(`Found ${availableSlots.length} available slots`);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/concepts/schedules">
+    Understand schedules, event types, and how the engine thinks about time.
+  </Card>
+  <Card title="Healthcare Example" icon="stethoscope" href="/examples/healthcare-clinic">
+    See a complete healthcare booking implementation with multiple providers.
+  </Card>
+  <Card title="Google Calendar" icon="calendar" href="/examples/google-calendar-integration">
+    Integrate with Google Calendar to block external events.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/get-available-slots">
+    Full documentation of all functions and types.
+  </Card>
+</CardGroup>

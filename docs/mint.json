@@ -1,0 +1,91 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "@courierkit/availability",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#07C983",
+    "dark": "#0D9373",
+    "anchors": {
+      "from": "#0D9373",
+      "to": "#07C983"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/courierkit/availability"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "/quickstart"
+  },
+  "tabs": [
+    {
+      "name": "API Reference",
+      "url": "api-reference"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/courierkit/availability"
+    },
+    {
+      "name": "NPM",
+      "icon": "npm",
+      "url": "https://www.npmjs.com/package/@courierkit/availability"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": ["introduction", "quickstart", "mental-model"]
+    },
+    {
+      "group": "Core Concepts",
+      "pages": [
+        "concepts/schedules",
+        "concepts/event-types",
+        "concepts/bookings-and-blocks",
+        "concepts/intervals"
+      ]
+    },
+    {
+      "group": "Examples",
+      "pages": [
+        "examples/healthcare-clinic",
+        "examples/multi-host-booking",
+        "examples/google-calendar-integration"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/get-available-slots",
+        "api-reference/expand-schedule",
+        "api-reference/expand-recurrence",
+        "api-reference/build-blocks-from-freebusy",
+        "api-reference/interval-functions"
+      ]
+    },
+    {
+      "group": "Types",
+      "pages": [
+        "api-reference/types/schedule",
+        "api-reference/types/event-type",
+        "api-reference/types/booking",
+        "api-reference/types/slot"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/courierkit/availability"
+  }
+}

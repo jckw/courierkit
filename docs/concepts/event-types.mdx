@@ -1,0 +1,292 @@
+---
+title: Event Types
+description: Configuring what can be booked and its constraints
+---
+
+# Event Types
+
+An event type represents something that can be booked—a consultation, a meeting room reservation, an equipment checkout. It carries the duration, buffer times, and various constraints.
+
+## Event Type Structure
+
+```typescript
+interface EventType {
+  id: string;
+  length: Duration;              // Duration in milliseconds
+
+  // Which schedule to use
+  scheduleKey?: string;          // Defaults to "default"
+
+  // Buffer time
+  bufferBefore?: Duration;
+  bufferAfter?: Duration;
+
+  // Slot generation
+  slotInterval?: Duration;       // Grid alignment; defaults to length
+
+  // Time constraints
+  minimumNotice?: Duration;      // How far in advance
+  maximumLeadTime?: Duration;    // How far into future
+
+  // Capacity constraints
+  maxPerDay?: number;
+  maxPerWeek?: number;
+
+  // Per-host customization
+  hostOverrides?: Record<string, Partial<EventType>>;
+}
+```
+
+## Basic Example
+
+A simple 30-minute meeting:
+
+```typescript
+const meeting: EventType = {
+  id: 'meeting',
+  length: 30 * 60 * 1000, // 30 minutes in milliseconds
+};
+```
+
+## Buffers
+
+Buffers block time before and/or after the appointment for preparation or wrap-up:
+
+```typescript
+const consultation: EventType = {
+  id: 'initial-consultation',
+  length: 60 * 60 * 1000,        // 1 hour appointment
+  bufferBefore: 15 * 60 * 1000,  // 15 min to review patient history
+  bufferAfter: 15 * 60 * 1000,   // 15 min for notes
+};
+```
+
+With these buffers, a 1-hour appointment actually blocks 1.5 hours:
+
+```
+       15 min          60 min           15 min
+    ┌─────────┬────────────────────┬─────────┐
+    │ buffer  │    appointment     │ buffer  │
+    │ before  │                    │  after  │
+    └─────────┴────────────────────┴─────────┘
+```
+
+<Warning>
+**Buffer Ownership**: Each booking's buffers come from its own event type, not the event type being queried. When computing availability for "follow-up visits," existing "initial consultations" will still block their full buffer time.
+</Warning>
+
+### Buffer Lookup for Existing Bookings
+
+When you have existing bookings of different event types, pass the `eventTypes` map so the engine knows each booking's buffer configuration:
+
+```typescript
+const slots = getAvailableSlots({
+  eventType: followUpVisit,
+  hosts: [drSmith],
+  bookings: existingBookings,
+  range: queryRange,
+
+  // Tell the engine about other event types' buffers
+  eventTypes: {
+    'initial-consultation': { bufferBefore: 15 * 60 * 1000, bufferAfter: 15 * 60 * 1000 },
+    'follow-up': { bufferAfter: 5 * 60 * 1000 },
+  },
+});
+```
+
+## Slot Interval (Grid Alignment)
+
+By default, slots are placed at intervals equal to the event length. The `slotInterval` option changes this:
+
+```typescript
+// 50-minute sessions on an hourly grid
+const therapySession: EventType = {
+  id: 'therapy',
+  length: 50 * 60 * 1000,        // 50 minutes
+  slotInterval: 60 * 60 * 1000,  // Start times at :00 each hour
+};
+```
+
+This produces slots at 9:00, 10:00, 11:00 (not 9:00, 9:50, 10:40):
+
+```
+9:00     10:00    11:00    12:00
+  |        |        |        |
+  ├──50m──┤├──50m──┤├──50m──┤
+```
+
+### When to Use Slot Interval
+
+- **50-minute therapy sessions**: Want hourly start times for easy scheduling
+- **45-minute classes**: Want consistent start times (9:00, 10:00, not 9:00, 9:45, 10:30)
+- **Variable break time**: 25-minute meetings with 5-minute breaks = 30-minute slots
+
+## Time Constraints
+
+### Minimum Notice
+
+Prevent last-minute bookings:
+
+```typescript
+const consultation: EventType = {
+  id: 'consultation',
+  length: 60 * 60 * 1000,
+  minimumNotice: 24 * 60 * 60 * 1000, // 24 hours
+};
+```
+
+Slots starting before `now + minimumNotice` won't be returned.
+
+### Maximum Lead Time
+
+Limit how far in advance people can book:
+
+```typescript
+const consultation: EventType = {
+  id: 'consultation',
+  length: 60 * 60 * 1000,
+  maximumLeadTime: 30 * 24 * 60 * 60 * 1000, // 30 days
+};
+```
+
+Even if you query for 6 months of availability, slots beyond `now + maximumLeadTime` won't be returned.
+
+## Capacity Constraints
+
+### Daily Limit
+
+Limit bookings per day per host:
+
+```typescript
+const surgery: EventType = {
+  id: 'surgery',
+  length: 2 * 60 * 60 * 1000,  // 2 hours
+  maxPerDay: 3,                 // Max 3 surgeries per day per surgeon
+};
+```
+
+The engine counts existing bookings of this event type and stops offering slots once the day hits capacity.
+
+### Weekly Limit
+
+Limit bookings per week per host:
+
+```typescript
+const intensiveSession: EventType = {
+  id: 'intensive',
+  length: 3 * 60 * 60 * 1000,  // 3 hours
+  maxPerDay: 1,
+  maxPerWeek: 3,                // Max 3 per week per therapist
+};
+```
+
+<Note>
+Weeks are counted using ISO week numbers (Monday-Sunday). A booking on Sunday and Monday of the same ISO week count toward the same weekly limit.
+</Note>
+
+## Host Overrides
+
+Different hosts may need different configurations for the same event type. Use `hostOverrides` instead of duplicating event types:
+
+```typescript
+const consultation: EventType = {
+  id: 'consultation',
+  length: 60 * 60 * 1000,
+  bufferAfter: 15 * 60 * 1000,
+  maxPerDay: 6,
+
+  hostOverrides: {
+    'dr-jones': {
+      // Dr. Jones needs more time for notes
+      bufferAfter: 30 * 60 * 1000,
+      // And sees fewer patients
+      maxPerDay: 4,
+    },
+    'dr-smith': {
+      // Dr. Smith is efficient and sees more patients
+      maxPerDay: 8,
+    },
+    'dr-wilson': {
+      // Dr. Wilson prefers 90-minute consultations
+      length: 90 * 60 * 1000,
+    },
+  },
+};
+```
+
+The resolved configuration for each host is the base event type merged with their override, with the override winning.
+
+## Complete Example: Dental Practice
+
+```typescript
+import type { EventType } from '@courierkit/availability';
+
+// Routine cleaning - hygienist handles these
+const cleaning: EventType = {
+  id: 'cleaning',
+  length: 45 * 60 * 1000,
+  slotInterval: 60 * 60 * 1000,  // Hourly slots
+  bufferAfter: 15 * 60 * 1000,   // Room turnover
+  minimumNotice: 4 * 60 * 60 * 1000, // 4 hours
+  maxPerDay: 8,
+};
+
+// New patient exam - dentist required
+const newPatientExam: EventType = {
+  id: 'new-patient-exam',
+  length: 90 * 60 * 1000,
+  bufferBefore: 15 * 60 * 1000,  // Review intake forms
+  bufferAfter: 15 * 60 * 1000,   // Discuss treatment plan
+  minimumNotice: 24 * 60 * 60 * 1000,
+  maxPerDay: 4,
+
+  hostOverrides: {
+    'dr-chen': {
+      // Dr. Chen takes longer with new patients
+      length: 120 * 60 * 1000,
+      maxPerDay: 3,
+    },
+  },
+};
+
+// Emergency slot - same day only
+const emergency: EventType = {
+  id: 'emergency',
+  length: 30 * 60 * 1000,
+  scheduleKey: 'emergency',  // Uses special emergency schedule
+  minimumNotice: 0,          // Can book immediately
+  maximumLeadTime: 24 * 60 * 60 * 1000, // Today only
+  maxPerDay: 2,              // Limited emergency capacity
+};
+
+// Complex procedure
+const rootCanal: EventType = {
+  id: 'root-canal',
+  length: 120 * 60 * 1000,
+  bufferBefore: 15 * 60 * 1000,
+  bufferAfter: 30 * 60 * 1000,  // Extra time for post-op instructions
+  minimumNotice: 72 * 60 * 60 * 1000, // 3 days
+  maxPerDay: 2,
+  maxPerWeek: 6,
+};
+```
+
+## Duration Constants
+
+For readability, consider defining duration constants:
+
+```typescript
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+
+const consultation: EventType = {
+  id: 'consultation',
+  length: 1 * HOUR,
+  bufferBefore: 15 * MINUTE,
+  bufferAfter: 15 * MINUTE,
+  minimumNotice: 24 * HOUR,
+  maximumLeadTime: 30 * DAY,
+};
+```

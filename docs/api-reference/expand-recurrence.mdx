@@ -1,0 +1,311 @@
+---
+title: expandRecurrence
+description: Expand recurring patterns into concrete intervals
+---
+
+# expandRecurrence
+
+Expands a recurrence rule into concrete UTC intervals within a date range. Useful for recurring events that aren't part of a host's schedule (e.g., recurring meetings, maintenance windows).
+
+## Signature
+
+```typescript
+function expandRecurrence(rule: RecurrenceRule, range: DateRange): Interval[]
+```
+
+## Parameters
+
+<ParamField path="rule" type="RecurrenceRule" required>
+  The recurrence rule defining the pattern.
+
+  <Expandable title="RecurrenceRule properties">
+    <ParamField path="frequency" type="'daily' | 'weekly' | 'biweekly' | 'monthly'" required>
+      How often the event recurs.
+    </ParamField>
+
+    <ParamField path="days" type="DayOfWeek[]">
+      Days of the week. Required for `weekly` and `biweekly`, optional filter for `daily`.
+    </ParamField>
+
+    <ParamField path="dayOfMonth" type="number">
+      Day of the month (1-31). Used with `monthly` frequency.
+    </ParamField>
+
+    <ParamField path="startTime" type="string" required>
+      Start time in HH:MM format (24-hour).
+    </ParamField>
+
+    <ParamField path="endTime" type="string" required>
+      End time in HH:MM format (24-hour).
+    </ParamField>
+
+    <ParamField path="timezone" type="string" required>
+      IANA timezone identifier.
+    </ParamField>
+
+    <ParamField path="start" type="Date">
+      Anchor date for biweekly cycles and count-based limits.
+    </ParamField>
+
+    <ParamField path="until" type="Date">
+      End date for the recurrence.
+    </ParamField>
+
+    <ParamField path="count" type="number">
+      Maximum number of occurrences.
+    </ParamField>
+
+    <ParamField path="exclude" type="Date[]">
+      Specific dates to skip.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="range" type="DateRange" required>
+  The date range to expand within.
+</ParamField>
+
+## Returns
+
+`Interval[]` — An array of UTC intervals for each occurrence.
+
+## Examples
+
+### Weekly Meeting
+
+```typescript
+import { expandRecurrence } from '@courierkit/availability';
+
+const standup = {
+  frequency: 'weekly' as const,
+  days: ['monday', 'wednesday', 'friday'] as const,
+  startTime: '09:00',
+  endTime: '09:30',
+  timezone: 'America/New_York',
+};
+
+const occurrences = expandRecurrence(standup, {
+  start: new Date('2024-01-15T00:00:00Z'),
+  end: new Date('2024-01-31T00:00:00Z'),
+});
+
+// Returns intervals for all Mon/Wed/Fri standups in the range
+```
+
+### Daily Event
+
+```typescript
+const dailySync = {
+  frequency: 'daily' as const,
+  startTime: '17:00',
+  endTime: '17:15',
+  timezone: 'Europe/London',
+};
+
+const occurrences = expandRecurrence(dailySync, thisWeek);
+// Returns 7 intervals (one per day)
+```
+
+### Daily with Day Filter
+
+```typescript
+// Daily, but only on weekdays
+const weekdayEvent = {
+  frequency: 'daily' as const,
+  days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'] as const,
+  startTime: '10:00',
+  endTime: '10:30',
+  timezone: 'America/Chicago',
+};
+
+const occurrences = expandRecurrence(weekdayEvent, thisWeek);
+// Returns 5 intervals (weekdays only)
+```
+
+### Biweekly Meeting
+
+```typescript
+const biweeklyReview = {
+  frequency: 'biweekly' as const,
+  days: ['thursday'] as const,
+  startTime: '14:00',
+  endTime: '15:00',
+  timezone: 'America/Los_Angeles',
+  start: new Date('2024-01-04T00:00:00Z'), // Anchor date (a Thursday)
+};
+
+const occurrences = expandRecurrence(biweeklyReview, {
+  start: new Date('2024-01-01T00:00:00Z'),
+  end: new Date('2024-02-01T00:00:00Z'),
+});
+
+// Returns biweekly Thursdays: Jan 4, Jan 18
+// (Jan 11, Jan 25 are skipped)
+```
+
+### Monthly Event
+
+```typescript
+const monthlyReport = {
+  frequency: 'monthly' as const,
+  dayOfMonth: 15,
+  startTime: '11:00',
+  endTime: '12:00',
+  timezone: 'America/New_York',
+};
+
+const occurrences = expandRecurrence(monthlyReport, {
+  start: new Date('2024-01-01T00:00:00Z'),
+  end: new Date('2024-07-01T00:00:00Z'),
+});
+
+// Returns 6 intervals: Jan 15, Feb 15, Mar 15, Apr 15, May 15, Jun 15
+```
+
+### With Count Limit
+
+```typescript
+const limitedSeries = {
+  frequency: 'weekly' as const,
+  days: ['tuesday'] as const,
+  startTime: '13:00',
+  endTime: '14:00',
+  timezone: 'America/New_York',
+  count: 4, // Only 4 occurrences
+};
+
+const occurrences = expandRecurrence(limitedSeries, {
+  start: new Date('2024-01-01T00:00:00Z'),
+  end: new Date('2024-12-31T00:00:00Z'),
+});
+
+// Returns only 4 intervals, even though range spans a year
+```
+
+### With Exclusions
+
+```typescript
+const meetingWithHolidays = {
+  frequency: 'weekly' as const,
+  days: ['monday'] as const,
+  startTime: '10:00',
+  endTime: '11:00',
+  timezone: 'America/New_York',
+  exclude: [
+    new Date('2024-01-15'), // MLK Day
+    new Date('2024-02-19'), // Presidents Day
+  ],
+};
+
+const occurrences = expandRecurrence(meetingWithHolidays, {
+  start: new Date('2024-01-01T00:00:00Z'),
+  end: new Date('2024-03-01T00:00:00Z'),
+});
+
+// Returns all Mondays except Jan 15 and Feb 19
+```
+
+### With Until Date
+
+```typescript
+const temporarySeries = {
+  frequency: 'daily' as const,
+  startTime: '08:00',
+  endTime: '08:30',
+  timezone: 'America/Chicago',
+  until: new Date('2024-01-20T00:00:00Z'),
+};
+
+const occurrences = expandRecurrence(temporarySeries, {
+  start: new Date('2024-01-01T00:00:00Z'),
+  end: new Date('2024-01-31T00:00:00Z'),
+});
+
+// Returns intervals only up to Jan 19 (until is exclusive)
+```
+
+## Use Cases
+
+### Converting Recurring Calendar Events to Blocks
+
+```typescript
+import { expandRecurrence, type Block } from '@courierkit/availability';
+
+// Recurring team meeting that blocks a host's time
+const recurringMeeting = {
+  frequency: 'weekly' as const,
+  days: ['wednesday'] as const,
+  startTime: '14:00',
+  endTime: '15:00',
+  timezone: 'America/New_York',
+};
+
+const meetingIntervals = expandRecurrence(recurringMeeting, queryRange);
+
+// Convert to blocks
+const meetingBlocks: Block[] = meetingIntervals.map(interval => ({
+  hostId: 'host-123',
+  start: interval.start,
+  end: interval.end,
+}));
+
+// Include in availability query
+const slots = getAvailableSlots({
+  eventType,
+  hosts,
+  bookings,
+  blocks: [...externalBlocks, ...meetingBlocks],
+  range: queryRange,
+});
+```
+
+### Recurring Maintenance Windows
+
+```typescript
+// System maintenance every Sunday night
+const maintenanceWindow = {
+  frequency: 'weekly' as const,
+  days: ['sunday'] as const,
+  startTime: '02:00',
+  endTime: '06:00',
+  timezone: 'UTC',
+};
+
+const maintenanceIntervals = expandRecurrence(maintenanceWindow, thisMonth);
+
+// Block all hosts during maintenance
+const maintenanceBlocks: Block[] = [];
+for (const host of allHosts) {
+  for (const interval of maintenanceIntervals) {
+    maintenanceBlocks.push({
+      hostId: host.hostId,
+      start: interval.start,
+      end: interval.end,
+    });
+  }
+}
+```
+
+### Recurring Availability (Inverse Use)
+
+```typescript
+// Special Saturday clinic hours, every other week
+const saturdayClinic = {
+  frequency: 'biweekly' as const,
+  days: ['saturday'] as const,
+  startTime: '09:00',
+  endTime: '13:00',
+  timezone: 'America/New_York',
+  start: new Date('2024-01-06'), // First Saturday
+};
+
+const saturdayIntervals = expandRecurrence(saturdayClinic, thisQuarter);
+
+// Add these as overrides to the regular schedule
+const saturdayOverrides = saturdayIntervals.map(interval => ({
+  date: interval.start,
+  available: true,
+  startTime: '09:00',
+  endTime: '13:00',
+}));
+```

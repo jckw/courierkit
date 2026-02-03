@@ -1,0 +1,126 @@
+---
+title: EventType
+description: Type definition for bookable event types
+---
+
+# EventType
+
+Defines a bookable event type with scheduling constraints.
+
+```typescript
+interface EventType {
+  /** Unique identifier for this event type */
+  id: string;
+
+  /** Duration of the event in milliseconds */
+  length: Duration;
+
+  /** Which host schedule to use; defaults to "default" */
+  scheduleKey?: string;
+
+  /** Blocked time before the slot (prep time) */
+  bufferBefore?: Duration;
+
+  /** Blocked time after the slot (wrap-up time) */
+  bufferAfter?: Duration;
+
+  /** Snap slots to this grid; defaults to length if not specified */
+  slotInterval?: Duration;
+
+  /** How far in advance the slot must be booked */
+  minimumNotice?: Duration;
+
+  /** How far into the future slots are offered */
+  maximumLeadTime?: Duration;
+
+  /** Maximum bookings of this type per host per day */
+  maxPerDay?: number;
+
+  /** Maximum bookings of this type per host per week */
+  maxPerWeek?: number;
+
+  /**
+   * Per-host customization without duplicating the entire event type.
+   * The resolved config is the event type merged with any host override,
+   * with the override winning.
+   */
+  hostOverrides?: Record<HostId, Partial<Omit<EventType, 'id' | 'hostOverrides'>>>;
+}
+```
+
+## Duration
+
+A duration in milliseconds.
+
+```typescript
+type Duration = number;
+
+// Common durations
+const fifteenMinutes: Duration = 15 * 60 * 1000;  // 900,000
+const oneHour: Duration = 60 * 60 * 1000;          // 3,600,000
+const oneDay: Duration = 24 * 60 * 60 * 1000;      // 86,400,000
+```
+
+## Example
+
+```typescript
+const consultation: EventType = {
+  id: 'initial-consultation',
+  length: 60 * 60 * 1000,          // 1 hour
+
+  // Buffers
+  bufferBefore: 15 * 60 * 1000,    // 15 min prep
+  bufferAfter: 15 * 60 * 1000,     // 15 min notes
+
+  // Grid alignment
+  slotInterval: 30 * 60 * 1000,    // 30 min grid
+
+  // Time constraints
+  minimumNotice: 24 * 60 * 60 * 1000,   // 24 hours
+  maximumLeadTime: 30 * 24 * 60 * 60 * 1000, // 30 days
+
+  // Capacity limits
+  maxPerDay: 4,
+  maxPerWeek: 15,
+
+  // Per-host customization
+  hostOverrides: {
+    'dr-jones': {
+      maxPerDay: 3,
+      bufferAfter: 20 * 60 * 1000,
+    },
+  },
+};
+```
+
+## EventTypeBufferConfig
+
+Used in `GetAvailableSlotsInput.eventTypes` to specify buffer durations for existing bookings.
+
+```typescript
+interface EventTypeBufferConfig {
+  /** Blocked time before the slot (prep time) */
+  bufferBefore?: Duration;
+
+  /** Blocked time after the slot (wrap-up time) */
+  bufferAfter?: Duration;
+}
+```
+
+### Example
+
+```typescript
+const slots = getAvailableSlots({
+  eventType: followUp,
+  hosts: [drSmith],
+  bookings: existingBookings,
+  range: nextWeek,
+
+  // Buffer config for different event types
+  eventTypes: {
+    'initial-consultation': { bufferBefore: 15 * 60 * 1000, bufferAfter: 15 * 60 * 1000 },
+    'follow-up': { bufferAfter: 5 * 60 * 1000 },
+    'physical': { bufferBefore: 10 * 60 * 1000, bufferAfter: 20 * 60 * 1000 },
+  },
+});
+```

@@ -1,0 +1,108 @@
+---
+title: Introduction
+description: A stateless, composable slot generation library for Node.js
+---
+
+# @courierkit/availability
+
+A stateless, composable slot generation library for Node.js. Given schedules, bookings, external calendar events, and event type configuration, it answers the question: **"When can this happen?"**
+
+## Why This Library?
+
+Building a booking system means wrestling with surprisingly complex questions:
+
+- What times is someone actually available, considering their weekly schedule, holidays, and time off?
+- How do existing appointments—with buffer time for prep and wrap-up—affect remaining availability?
+- How do you enforce limits like "max 4 consultations per day" or "minimum 24 hours notice"?
+- What happens when you need to check availability across multiple people?
+
+This library handles all of that in a single, stateless function call. You bring the data, we compute the slots.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Stateless" icon="database">
+    No side effects, no caching, no persistence. You own your data—the engine just computes.
+  </Card>
+  <Card title="Timezone-Aware" icon="globe">
+    Schedules are defined in local time (because "9am–5pm Eastern" is natural). Everything else is UTC.
+  </Card>
+  <Card title="Composable" icon="puzzle-piece">
+    Low-level interval arithmetic is exposed so you can build custom logic on top.
+  </Card>
+  <Card title="Type-Safe" icon="shield-check">
+    Full TypeScript support with comprehensive type definitions.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+Everything is an interval on a timeline. The engine layers intervals on top of each other:
+
+```
+Availability (schedule)          ████████████████████████████
+− Bookings                          ████       ████
+− External calendar blocks               ███
+− Buffer zones (derived)            ▒█████▒    ▒████▒
+− Minimum notice window          ███
+= Available slots                         ░░░░        ░░░░░░░
+```
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install @courierkit/availability
+```
+
+```bash yarn
+yarn add @courierkit/availability
+```
+
+```bash pnpm
+pnpm add @courierkit/availability
+```
+
+```bash bun
+bun add @courierkit/availability
+```
+</CodeGroup>
+
+## Quick Example
+
+```typescript
+import { getAvailableSlots } from '@courierkit/availability';
+
+const slots = getAvailableSlots({
+  eventType: {
+    id: 'consultation',
+    length: 60 * 60 * 1000, // 1 hour
+    minimumNotice: 24 * 60 * 60 * 1000, // 24 hours
+  },
+  hosts: [{
+    hostId: 'dr-smith',
+    schedules: {
+      default: {
+        id: 'default',
+        rules: [{
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '09:00',
+          endTime: '17:00',
+          timezone: 'America/New_York',
+        }],
+      },
+    },
+  }],
+  bookings: [],
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+});
+
+// Returns: Array of { hostId, start, end } slots
+```
+
+<Card title="Ready to dive in?" icon="rocket" href="/quickstart">
+  Follow our quickstart guide to build your first booking page in minutes.
+</Card>

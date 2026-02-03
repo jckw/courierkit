@@ -1,0 +1,192 @@
+---
+title: buildBlocksFromFreebusy
+description: Convert Google Calendar FreeBusy API response to blocks
+---
+
+# buildBlocksFromFreebusy
+
+Converts a Google Calendar FreeBusy API response into an array of `Block` objects that can be passed to `getAvailableSlots`.
+
+## Signature
+
+```typescript
+function buildBlocksFromFreebusy(
+  freebusy: FreeBusyResponse,
+  hostId: HostId
+): Block[]
+```
+
+## Parameters
+
+<ParamField path="freebusy" type="FreeBusyResponse" required>
+  The response from Google Calendar's FreeBusy API.
+
+  <Expandable title="FreeBusyResponse structure">
+    ```typescript
+    interface FreeBusyResponse {
+      calendars: Record<string, {
+        busy: Array<{
+          start: string | Date;
+          end: string | Date;
+        }>;
+      }>;
+    }
+    ```
+  </Expandable>
+</ParamField>
+
+<ParamField path="hostId" type="string" required>
+  The host ID to associate with the blocks.
+</ParamField>
+
+## Returns
+
+`Block[]` — An array of blocks representing all busy periods across all calendars in the response.
+
+## Example
+
+```typescript
+import { buildBlocksFromFreebusy } from '@courierkit/availability';
+
+// Response from Google Calendar FreeBusy API
+const freebusyResponse = {
+  calendars: {
+    'primary': {
+      busy: [
+        { start: '2024-01-15T14:00:00Z', end: '2024-01-15T15:00:00Z' },
+        { start: '2024-01-15T17:00:00Z', end: '2024-01-15T18:00:00Z' },
+      ],
+    },
+    'team@group.calendar.google.com': {
+      busy: [
+        { start: '2024-01-16T10:00:00Z', end: '2024-01-16T11:00:00Z' },
+      ],
+    },
+  },
+};
+
+const blocks = buildBlocksFromFreebusy(freebusyResponse, 'dr-smith');
+
+// Result:
+// [
+//   { hostId: 'dr-smith', start: Date(2024-01-15T14:00:00Z), end: Date(2024-01-15T15:00:00Z) },
+//   { hostId: 'dr-smith', start: Date(2024-01-15T17:00:00Z), end: Date(2024-01-15T18:00:00Z) },
+//   { hostId: 'dr-smith', start: Date(2024-01-16T10:00:00Z), end: Date(2024-01-16T11:00:00Z) },
+// ]
+```
+
+## With Google Calendar API
+
+```typescript
+import { google } from 'googleapis';
+import { buildBlocksFromFreebusy, getAvailableSlots } from '@courierkit/availability';
+
+async function getAvailabilityWithCalendar(hostId: string, calendarId: string) {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+  });
+
+  const calendar = google.calendar({ version: 'v3', auth });
+
+  // Query the FreeBusy API
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: new Date().toISOString(),
+      timeMax: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+      items: [{ id: calendarId }],
+    },
+  });
+
+  // Convert to blocks
+  const blocks = buildBlocksFromFreebusy(response.data, hostId);
+
+  // Use in availability query
+  return getAvailableSlots({
+    eventType: myEventType,
+    hosts: [hostSchedules],
+    bookings: existingBookings,
+    blocks: blocks,
+    range: {
+      start: new Date(),
+      end: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+    },
+  });
+}
+```
+
+## Handling Multiple Calendars
+
+If querying multiple calendars for the same host, they're all aggregated:
+
+```typescript
+// Query multiple calendars at once
+const response = await calendar.freebusy.query({
+  requestBody: {
+    timeMin: range.start.toISOString(),
+    timeMax: range.end.toISOString(),
+    items: [
+      { id: 'work@example.com' },
+      { id: 'personal@gmail.com' },
+      { id: 'shared@group.calendar.google.com' },
+    ],
+  },
+});
+
+// All busy times from all calendars are converted to blocks
+const blocks = buildBlocksFromFreebusy(response.data, 'host-123');
+```
+
+## Handling Different Hosts
+
+When fetching for multiple hosts, call the helper separately for each:
+
+```typescript
+const hostCalendarMap = {
+  'dr-smith': 'dr.smith@clinic.com',
+  'dr-jones': 'dr.jones@clinic.com',
+};
+
+const allBlocks: Block[] = [];
+
+for (const [hostId, calendarId] of Object.entries(hostCalendarMap)) {
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: range.start.toISOString(),
+      timeMax: range.end.toISOString(),
+      items: [{ id: calendarId }],
+    },
+  });
+
+  const hostBlocks = buildBlocksFromFreebusy(response.data, hostId);
+  allBlocks.push(...hostBlocks);
+}
+```
+
+## Date Handling
+
+The helper accepts both ISO strings and Date objects in the busy periods:
+
+```typescript
+// Both formats work
+const response1 = {
+  calendars: {
+    primary: {
+      busy: [
+        { start: '2024-01-15T14:00:00Z', end: '2024-01-15T15:00:00Z' }, // Strings
+      ],
+    },
+  },
+};
+
+const response2 = {
+  calendars: {
+    primary: {
+      busy: [
+        { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T15:00:00Z') }, // Dates
+      ],
+    },
+  },
+};
+
+// Both produce the same blocks
+```

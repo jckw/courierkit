@@ -1,0 +1,121 @@
+---
+title: Booking & Block
+description: Type definitions for existing commitments
+---
+
+# Booking
+
+An existing booking that consumes a host's time.
+
+```typescript
+interface Booking {
+  /** Optional unique identifier for this booking */
+  id?: string;
+
+  /** The host this booking belongs to */
+  hostId: HostId;
+
+  /** Start time of the booking (inclusive) */
+  start: DateTime;
+
+  /** End time of the booking (exclusive) */
+  end: DateTime;
+
+  /** Optional event type ID; used for maxPerDay/maxPerWeek counting */
+  eventTypeId?: string;
+}
+```
+
+## Example
+
+```typescript
+const existingBooking: Booking = {
+  id: 'booking-456',
+  hostId: 'dr-smith-123',
+  start: new Date('2024-01-15T14:00:00Z'),
+  end: new Date('2024-01-15T15:00:00Z'),
+  eventTypeId: 'initial-consultation',
+};
+```
+
+## Why eventTypeId Matters
+
+The `eventTypeId` field serves two purposes:
+
+1. **Capacity counting**: When the engine evaluates `maxPerDay` and `maxPerWeek` constraints, it only counts bookings with the same `eventTypeId` as the queried event type.
+
+2. **Buffer lookup**: Each booking should be inflated by its own event type's buffers. Pass the `eventTypes` map to `getAvailableSlots` so the engine knows the correct buffers.
+
+```typescript
+// Without eventTypeId, this booking:
+// - Won't be counted toward any daily/weekly limits
+// - Will be subtracted with zero buffer
+
+// With eventTypeId, this booking:
+// - Counts toward "consultation" daily/weekly limits
+// - Gets inflated by consultation's bufferBefore/bufferAfter
+```
+
+---
+
+# Block
+
+An external calendar event or manually defined busy period.
+
+```typescript
+interface Block {
+  /** The host this block belongs to */
+  hostId: HostId;
+
+  /** Start time of the block (inclusive) */
+  start: DateTime;
+
+  /** End time of the block (exclusive) */
+  end: DateTime;
+}
+```
+
+## Example
+
+```typescript
+const lunchBlock: Block = {
+  hostId: 'dr-smith-123',
+  start: new Date('2024-01-15T17:00:00Z'),
+  end: new Date('2024-01-15T18:00:00Z'),
+};
+```
+
+## Booking vs Block
+
+| | Booking | Block |
+|---|---------|-------|
+| **Source** | Your booking system | External calendars, ad-hoc |
+| **Has eventTypeId** | Yes (optional) | No |
+| **Counts toward limits** | Yes (if eventTypeId matches) | No |
+| **Buffer inflation** | Yes (from eventTypes map) | No |
+
+Both are subtracted from availability the same way—the difference is metadata.
+
+---
+
+# DateTime
+
+A point in time represented as a JavaScript Date object.
+
+```typescript
+type DateTime = Date;
+```
+
+All DateTimes are stored and processed in UTC internally.
+
+---
+
+# HostId
+
+Opaque identifier for a host.
+
+```typescript
+type HostId = string;
+```
+
+A host is anyone or anything that can be booked (clinician, room, equipment, vehicle, etc.). The engine doesn't validate or interpret host IDs—they're just strings used for matching.

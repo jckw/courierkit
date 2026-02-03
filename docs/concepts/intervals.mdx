@@ -1,0 +1,333 @@
+---
+title: Intervals
+description: The fundamental time primitive and interval arithmetic
+---
+
+# Intervals
+
+The interval is the fundamental primitive in the slot engine. Understanding intervals helps you debug, extend, and compose custom logic.
+
+## What's an Interval?
+
+An interval is a time range with a start and end:
+
+```typescript
+interface Interval {
+  start: Date;  // inclusive
+  end: Date;    // exclusive
+}
+```
+
+All intervals in this library are **half-open**: `[start, end)`. The start time is included, the end time is excluded.
+
+### Why Half-Open?
+
+Half-open intervals have elegant properties:
+
+1. **No gaps or overlaps**: `[9:00, 10:00)` and `[10:00, 11:00)` are perfectly adjacent
+2. **Duration is simple**: `end - start` gives the exact duration
+3. **Empty intervals are clear**: `start >= end` means empty
+
+```
+9:00        10:00       11:00
+  |←─ interval 1 ─→|←─ interval 2 ─→|
+  [    9:00-10:00   )[   10:00-11:00  )
+```
+
+## Interval Operations
+
+The library exposes three low-level functions for interval arithmetic:
+
+### `mergeIntervals`
+
+Combines overlapping or adjacent intervals into a minimal set:
+
+```typescript
+import { mergeIntervals } from '@courierkit/availability';
+
+const intervals = [
+  { start: new Date('2024-01-15T09:00:00Z'), end: new Date('2024-01-15T11:00:00Z') },
+  { start: new Date('2024-01-15T10:00:00Z'), end: new Date('2024-01-15T12:00:00Z') },
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T16:00:00Z') },
+];
+
+const merged = mergeIntervals(intervals);
+// Result:
+// [
+//   { start: 2024-01-15T09:00:00Z, end: 2024-01-15T12:00:00Z },
+//   { start: 2024-01-15T14:00:00Z, end: 2024-01-15T16:00:00Z },
+// ]
+```
+
+**Use case**: Combining availability from multiple sources before processing.
+
+### `subtractIntervals`
+
+Removes time covered by one set of intervals from another:
+
+```typescript
+import { subtractIntervals } from '@courierkit/availability';
+
+// Available time
+const available = [
+  { start: new Date('2024-01-15T09:00:00Z'), end: new Date('2024-01-15T17:00:00Z') },
+];
+
+// Blocked time (lunch + meeting)
+const blocked = [
+  { start: new Date('2024-01-15T12:00:00Z'), end: new Date('2024-01-15T13:00:00Z') },
+  { start: new Date('2024-01-15T15:00:00Z'), end: new Date('2024-01-15T16:00:00Z') },
+];
+
+const remaining = subtractIntervals(available, blocked);
+// Result:
+// [
+//   { start: 2024-01-15T09:00:00Z, end: 2024-01-15T12:00:00Z },
+//   { start: 2024-01-15T13:00:00Z, end: 2024-01-15T15:00:00Z },
+//   { start: 2024-01-15T16:00:00Z, end: 2024-01-15T17:00:00Z },
+// ]
+```
+
+Visually:
+
+```
+Available: ████████████████████████████████████████
+           9:00                                17:00
+
+Blocked:              ████          ████
+                     12:00-13:00   15:00-16:00
+
+Result:    ██████████      ████████      ████████
+           9:00-12:00     13:00-15:00   16:00-17:00
+```
+
+**Use case**: Removing busy time from available time.
+
+### `intersectIntervals`
+
+Finds time that appears in both sets of intervals:
+
+```typescript
+import { intersectIntervals } from '@courierkit/availability';
+
+// Dr. Smith's availability
+const drSmith = [
+  { start: new Date('2024-01-15T09:00:00Z'), end: new Date('2024-01-15T14:00:00Z') },
+];
+
+// Dr. Jones's availability
+const drJones = [
+  { start: new Date('2024-01-15T11:00:00Z'), end: new Date('2024-01-15T17:00:00Z') },
+];
+
+const overlap = intersectIntervals(drSmith, drJones);
+// Result:
+// [
+//   { start: 2024-01-15T11:00:00Z, end: 2024-01-15T14:00:00Z },
+// ]
+```
+
+Visually:
+
+```
+Dr. Smith: ████████████████████
+           9:00              14:00
+
+Dr. Jones:           ████████████████████████
+                    11:00                   17:00
+
+Overlap:             ████████████
+                    11:00      14:00
+```
+
+**Use case**: Finding times when multiple people are all available.
+
+## Practical Examples
+
+### Custom "All Must Be Free" Logic
+
+The engine computes "any host available" by default. For meetings requiring all attendees, use intersection:
+
+```typescript
+import {
+  getAvailableSlots,
+  intersectIntervals,
+  type Slot
+} from '@courierkit/availability';
+
+function getAllMustBeFreeSlots(
+  hosts: HostSchedules[],
+  eventType: EventType,
+  bookings: Booking[],
+  range: DateRange
+): Slot[] {
+  // Get slots for each host individually
+  const slotsPerHost = hosts.map(host =>
+    getAvailableSlots({
+      eventType,
+      hosts: [host],
+      bookings: bookings.filter(b => b.hostId === host.hostId),
+      range,
+    })
+  );
+
+  // Convert slots to intervals
+  const intervalsPerHost = slotsPerHost.map(slots =>
+    slots.map(slot => ({ start: slot.start, end: slot.end }))
+  );
+
+  // Intersect all hosts' availability
+  let commonIntervals = intervalsPerHost[0];
+  for (let i = 1; i < intervalsPerHost.length; i++) {
+    commonIntervals = intersectIntervals(commonIntervals, intervalsPerHost[i]);
+  }
+
+  // Convert back to slots (pick first host as representative)
+  return commonIntervals.map(interval => ({
+    hostId: hosts.map(h => h.hostId).join('+'),
+    start: interval.start,
+    end: interval.end,
+  }));
+}
+```
+
+### Visualizing Availability
+
+Build a timeline visualization by working with intervals:
+
+```typescript
+import { expandSchedule, subtractIntervals } from '@courierkit/availability';
+
+function getAvailabilityTimeline(
+  schedule: Schedule,
+  bookings: Booking[],
+  range: DateRange
+) {
+  // Get base availability
+  const available = expandSchedule(schedule, range);
+
+  // Convert bookings to intervals
+  const booked = bookings.map(b => ({ start: b.start, end: b.end }));
+
+  // Get remaining free time
+  const free = subtractIntervals(available, booked);
+
+  return {
+    scheduled: available,
+    booked: booked,
+    free: free,
+  };
+}
+
+// Use for a calendar heatmap or timeline UI
+const timeline = getAvailabilityTimeline(drSmith.schedules.default, bookings, thisWeek);
+```
+
+### Finding Gaps in Coverage
+
+Check if there are gaps when hosts don't overlap:
+
+```typescript
+import { mergeIntervals, subtractIntervals } from '@courierkit/availability';
+
+function findCoverageGaps(
+  hosts: HostSchedules[],
+  requiredCoverage: Interval[],
+  range: DateRange
+): Interval[] {
+  // Get all hosts' availability and merge
+  const allAvailability = hosts.flatMap(host =>
+    expandSchedule(host.schedules.default, range)
+  );
+  const mergedAvailability = mergeIntervals(allAvailability);
+
+  // Find gaps: required coverage minus actual coverage
+  return subtractIntervals(requiredCoverage, mergedAvailability);
+}
+
+// Check if the clinic has coverage 9-5 every weekday
+const requiredHours = [
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T22:00:00Z') },
+  { start: new Date('2024-01-16T14:00:00Z'), end: new Date('2024-01-16T22:00:00Z') },
+  // ...
+];
+
+const gaps = findCoverageGaps(allDoctors, requiredHours, thisWeek);
+if (gaps.length > 0) {
+  console.log('Coverage gaps found:', gaps);
+}
+```
+
+### Custom Slot Filtering
+
+Apply custom filters after computing intervals:
+
+```typescript
+import { getAvailableSlots } from '@courierkit/availability';
+
+// Get standard slots
+const allSlots = getAvailableSlots({ /* ... */ });
+
+// Filter: No appointments during lunch for this specific host
+const lunchStart = 12; // noon local time
+const lunchEnd = 13;
+
+const filteredSlots = allSlots.filter(slot => {
+  if (slot.hostId !== 'dr-prefers-lunch-break') {
+    return true;
+  }
+
+  // Convert slot start to local hour
+  const localHour = new Date(slot.start).toLocaleString('en-US', {
+    timeZone: 'America/Chicago',
+    hour: 'numeric',
+    hour12: false,
+  });
+
+  const hour = parseInt(localHour);
+  return hour < lunchStart || hour >= lunchEnd;
+});
+```
+
+## Interval Gotchas
+
+### Timezone Handling
+
+Intervals are always UTC `Date` objects. When displaying to users:
+
+```typescript
+// Wrong: Treating UTC as local
+const badDisplay = slot.start.toLocaleString(); // Uses system timezone
+
+// Right: Explicit timezone conversion
+const goodDisplay = slot.start.toLocaleString('en-US', {
+  timeZone: 'America/New_York',
+});
+```
+
+### Comparing Intervals
+
+Use `.getTime()` for reliable comparisons:
+
+```typescript
+// Wrong: Object comparison
+if (interval1.start === interval2.start) { } // Always false
+
+// Right: Time comparison
+if (interval1.start.getTime() === interval2.start.getTime()) { }
+```
+
+### Mutation
+
+The interval functions don't mutate input arrays, but be careful with Date objects:
+
+```typescript
+// The returned intervals have new Date objects
+const merged = mergeIntervals(original);
+
+// Safe to modify returned dates
+merged[0].start.setHours(0); // Doesn't affect original
+
+// But don't modify the original dates
+original[0].start.setHours(0); // Bad! Mutates shared Date
+```

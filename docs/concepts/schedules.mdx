@@ -1,0 +1,304 @@
+---
+title: Schedules
+description: Defining recurring availability patterns
+---
+
+# Schedules
+
+A schedule defines when a host is available for booking. Schedules consist of **rules** (recurring patterns) and **overrides** (exceptions for specific dates).
+
+## Schedule Structure
+
+```typescript
+interface Schedule {
+  id: string;
+  rules: ScheduleRule[];
+  overrides?: ScheduleOverride[];
+}
+```
+
+## Schedule Rules
+
+Rules define recurring availability. Each rule specifies:
+
+- Which days of the week it applies to
+- The time window (in local time)
+- The timezone
+- Optional effective date range
+
+```typescript
+const rule: ScheduleRule = {
+  days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  startTime: '09:00',
+  endTime: '17:00',
+  timezone: 'America/New_York',
+  effectiveFrom: '2024-01-01',  // optional
+  effectiveUntil: '2024-12-31', // optional
+};
+```
+
+### Multiple Rules
+
+A schedule can have multiple rules for different patterns:
+
+```typescript
+const schedule: Schedule = {
+  id: 'default',
+  rules: [
+    // Weekday mornings
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '09:00',
+      endTime: '12:00',
+      timezone: 'America/Chicago',
+    },
+    // Weekday afternoons (with a lunch break)
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '13:00',
+      endTime: '17:00',
+      timezone: 'America/Chicago',
+    },
+    // Saturday half-day
+    {
+      days: ['saturday'],
+      startTime: '10:00',
+      endTime: '14:00',
+      timezone: 'America/Chicago',
+    },
+  ],
+};
+```
+
+### Time-Limited Rules
+
+Use `effectiveFrom` and `effectiveUntil` for seasonal or transitional schedules:
+
+```typescript
+const schedule: Schedule = {
+  id: 'default',
+  rules: [
+    // Winter hours (shorter days)
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '09:00',
+      endTime: '16:00',
+      timezone: 'America/New_York',
+      effectiveFrom: '2024-11-01',
+      effectiveUntil: '2025-03-01',
+    },
+    // Summer hours (longer days)
+    {
+      days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+      startTime: '08:00',
+      endTime: '18:00',
+      timezone: 'America/New_York',
+      effectiveFrom: '2025-03-01',
+      effectiveUntil: '2025-11-01',
+    },
+  ],
+};
+```
+
+## Schedule Overrides
+
+Overrides handle exceptions—holidays, vacation days, or special availability:
+
+```typescript
+interface ScheduleOverride {
+  date: string | Date;      // The specific date
+  available: boolean;       // true = add availability, false = remove it
+  startTime?: string;       // Optional time window
+  endTime?: string;
+}
+```
+
+### Removing Availability
+
+Block entire days or specific time windows:
+
+```typescript
+const overrides: ScheduleOverride[] = [
+  // Entire day off
+  { date: '2024-12-25', available: false },
+
+  // Morning off only (keeps afternoon available)
+  { date: '2024-01-15', available: false, startTime: '09:00', endTime: '12:00' },
+];
+```
+
+### Adding Availability
+
+Add availability on days that aren't covered by rules:
+
+```typescript
+const overrides: ScheduleOverride[] = [
+  // Special Saturday availability
+  {
+    date: '2024-01-20',
+    available: true,
+    startTime: '10:00',
+    endTime: '14:00',
+  },
+];
+```
+
+<Note>
+When adding availability with `available: true`, you must specify `startTime` and `endTime`. The engine doesn't assume what hours you want to add.
+</Note>
+
+## Complete Example: Medical Practice
+
+Here's a realistic schedule for a medical practice with complex hours:
+
+```typescript
+import type { Schedule, HostSchedules } from '@courierkit/availability';
+
+const drWilsonSchedule: Schedule = {
+  id: 'default',
+  rules: [
+    // Monday: Office hours
+    {
+      days: ['monday'],
+      startTime: '08:00',
+      endTime: '12:00',
+      timezone: 'America/Los_Angeles',
+    },
+    {
+      days: ['monday'],
+      startTime: '13:00',
+      endTime: '17:00',
+      timezone: 'America/Los_Angeles',
+    },
+    // Tuesday: Hospital rounds in morning, office in afternoon
+    {
+      days: ['tuesday'],
+      startTime: '14:00',
+      endTime: '18:00',
+      timezone: 'America/Los_Angeles',
+    },
+    // Wednesday: Full day
+    {
+      days: ['wednesday'],
+      startTime: '08:00',
+      endTime: '17:00',
+      timezone: 'America/Los_Angeles',
+    },
+    // Thursday: Same as Tuesday
+    {
+      days: ['thursday'],
+      startTime: '14:00',
+      endTime: '18:00',
+      timezone: 'America/Los_Angeles',
+    },
+    // Friday: Half day
+    {
+      days: ['friday'],
+      startTime: '08:00',
+      endTime: '12:00',
+      timezone: 'America/Los_Angeles',
+    },
+  ],
+  overrides: [
+    // Thanksgiving week
+    { date: '2024-11-28', available: false },
+    { date: '2024-11-29', available: false },
+
+    // Extended hours for flu season
+    {
+      date: '2024-10-15',
+      available: true,
+      startTime: '17:00',
+      endTime: '19:00',
+    },
+
+    // Conference day
+    { date: '2024-09-20', available: false },
+  ],
+};
+
+const drWilson: HostSchedules = {
+  hostId: 'dr-wilson',
+  schedules: {
+    default: drWilsonSchedule,
+  },
+};
+```
+
+## Multiple Schedules per Host
+
+A host can have multiple named schedules for different appointment types:
+
+```typescript
+const drSmith: HostSchedules = {
+  hostId: 'dr-smith',
+  schedules: {
+    // In-office appointments
+    default: {
+      id: 'default',
+      rules: [{
+        days: ['monday', 'tuesday', 'wednesday'],
+        startTime: '09:00',
+        endTime: '17:00',
+        timezone: 'America/New_York',
+      }],
+    },
+    // Telehealth has extended hours (evenings and weekends)
+    telehealth: {
+      id: 'telehealth',
+      rules: [
+        {
+          days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+          startTime: '07:00',
+          endTime: '20:00',
+          timezone: 'America/New_York',
+        },
+        {
+          days: ['saturday'],
+          startTime: '09:00',
+          endTime: '13:00',
+          timezone: 'America/New_York',
+        },
+      ],
+    },
+  },
+};
+```
+
+Then reference the schedule in your event type:
+
+```typescript
+const telehealthVisit: EventType = {
+  id: 'telehealth-visit',
+  length: 30 * 60 * 1000,
+  scheduleKey: 'telehealth',  // Uses the telehealth schedule
+};
+
+const officeVisit: EventType = {
+  id: 'office-visit',
+  length: 30 * 60 * 1000,
+  // scheduleKey defaults to 'default'
+};
+```
+
+## Expanding Schedules
+
+You can use `expandSchedule` directly to see what intervals a schedule produces:
+
+```typescript
+import { expandSchedule } from '@courierkit/availability';
+
+const intervals = expandSchedule(drWilsonSchedule, {
+  start: new Date('2024-01-15T00:00:00Z'),
+  end: new Date('2024-01-22T00:00:00Z'),
+});
+
+// Returns UTC intervals:
+// [
+//   { start: 2024-01-15T16:00:00Z, end: 2024-01-15T20:00:00Z },  // Monday 8am-12pm PST
+//   { start: 2024-01-15T21:00:00Z, end: 2024-01-16T01:00:00Z },  // Monday 1pm-5pm PST
+//   ...
+// ]
+```
+
+This is useful for debugging or building custom logic on top of schedules.

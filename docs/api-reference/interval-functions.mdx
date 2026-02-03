@@ -1,0 +1,287 @@
+---
+title: Interval Functions
+description: Low-level interval arithmetic for custom logic
+---
+
+# Interval Functions
+
+The library exposes three low-level interval arithmetic functions. These are the building blocks used internally by the engine, and they're available for building custom logic.
+
+All functions work with arrays of `Interval` objects:
+
+```typescript
+interface Interval {
+  start: Date;
+  end: Date;
+}
+```
+
+All intervals are half-open: `[start, end)` — start is inclusive, end is exclusive.
+
+---
+
+## mergeIntervals
+
+Combines overlapping or adjacent intervals into a minimal set of non-overlapping intervals.
+
+### Signature
+
+```typescript
+function mergeIntervals(intervals: Interval[]): Interval[]
+```
+
+### Parameters
+
+<ParamField path="intervals" type="Interval[]" required>
+  Array of intervals to merge. Can be unsorted with overlaps.
+</ParamField>
+
+### Returns
+
+`Interval[]` — Sorted array of non-overlapping intervals covering the same total time.
+
+### Example
+
+```typescript
+import { mergeIntervals } from '@courierkit/availability';
+
+const intervals = [
+  { start: new Date('2024-01-15T10:00:00Z'), end: new Date('2024-01-15T12:00:00Z') },
+  { start: new Date('2024-01-15T11:00:00Z'), end: new Date('2024-01-15T13:00:00Z') },
+  { start: new Date('2024-01-15T15:00:00Z'), end: new Date('2024-01-15T17:00:00Z') },
+];
+
+const merged = mergeIntervals(intervals);
+// Result:
+// [
+//   { start: 2024-01-15T10:00:00Z, end: 2024-01-15T13:00:00Z },  // Merged
+//   { start: 2024-01-15T15:00:00Z, end: 2024-01-15T17:00:00Z },  // Separate
+// ]
+```
+
+### Behavior Notes
+
+- Empty input returns empty array
+- Invalid intervals (where `start >= end`) are filtered out
+- Adjacent intervals (sharing an endpoint) are merged
+- Input array is not mutated
+
+---
+
+## subtractIntervals
+
+Removes time covered by one set of intervals from another set.
+
+### Signature
+
+```typescript
+function subtractIntervals(from: Interval[], subtract: Interval[]): Interval[]
+```
+
+### Parameters
+
+<ParamField path="from" type="Interval[]" required>
+  The intervals to subtract from.
+</ParamField>
+
+<ParamField path="subtract" type="Interval[]" required>
+  The intervals to remove.
+</ParamField>
+
+### Returns
+
+`Interval[]` — The remaining intervals after subtraction, sorted by start time.
+
+### Example
+
+```typescript
+import { subtractIntervals } from '@courierkit/availability';
+
+// Work day: 9am - 5pm
+const available = [
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T22:00:00Z') },
+];
+
+// Blocked: lunch and a meeting
+const blocked = [
+  { start: new Date('2024-01-15T17:00:00Z'), end: new Date('2024-01-15T18:00:00Z') }, // Lunch
+  { start: new Date('2024-01-15T20:00:00Z'), end: new Date('2024-01-15T21:00:00Z') }, // Meeting
+];
+
+const free = subtractIntervals(available, blocked);
+// Result:
+// [
+//   { start: 2024-01-15T14:00:00Z, end: 2024-01-15T17:00:00Z },  // Before lunch
+//   { start: 2024-01-15T18:00:00Z, end: 2024-01-15T20:00:00Z },  // Between lunch and meeting
+//   { start: 2024-01-15T21:00:00Z, end: 2024-01-15T22:00:00Z },  // After meeting
+// ]
+```
+
+### Visual
+
+```
+From:      ██████████████████████████████████████████████████
+           9am                                             5pm
+
+Subtract:                 ████            ████
+                         12-1pm          3-4pm
+
+Result:    ██████████████      ██████████      ██████████████
+           9am-12pm           1pm-3pm         4pm-5pm
+```
+
+### Behavior Notes
+
+- Empty `from` returns empty array
+- Empty `subtract` returns merged `from`
+- May split intervals if subtraction creates holes
+- Handles complete overlaps (interval entirely removed)
+- Handles partial overlaps (interval trimmed)
+
+---
+
+## intersectIntervals
+
+Finds the time that appears in both sets of intervals.
+
+### Signature
+
+```typescript
+function intersectIntervals(a: Interval[], b: Interval[]): Interval[]
+```
+
+### Parameters
+
+<ParamField path="a" type="Interval[]" required>
+  First set of intervals.
+</ParamField>
+
+<ParamField path="b" type="Interval[]" required>
+  Second set of intervals.
+</ParamField>
+
+### Returns
+
+`Interval[]` — Intervals representing time present in both a and b.
+
+### Example
+
+```typescript
+import { intersectIntervals } from '@courierkit/availability';
+
+// Alice: available 9am - 2pm
+const alice = [
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T19:00:00Z') },
+];
+
+// Bob: available 11am - 5pm
+const bob = [
+  { start: new Date('2024-01-15T16:00:00Z'), end: new Date('2024-01-15T22:00:00Z') },
+];
+
+const bothFree = intersectIntervals(alice, bob);
+// Result:
+// [
+//   { start: 2024-01-15T16:00:00Z, end: 2024-01-15T19:00:00Z },  // 11am - 2pm overlap
+// ]
+```
+
+### Visual
+
+```
+Alice:     ██████████████████████████████
+           9am                         2pm
+
+Bob:                   ██████████████████████████████████████
+                      11am                                5pm
+
+Overlap:               ██████████████████
+                      11am            2pm
+```
+
+### Behavior Notes
+
+- Empty input for either set returns empty array
+- Uses efficient two-pointer algorithm on sorted intervals
+- Returns minimal set of non-overlapping intervals
+
+---
+
+## Combining Functions
+
+These functions compose for complex logic:
+
+### Finding Gaps in Coverage
+
+```typescript
+import { mergeIntervals, subtractIntervals } from '@courierkit/availability';
+
+function findCoverageGaps(
+  provided: Interval[],
+  required: Interval[]
+): Interval[] {
+  const mergedProvided = mergeIntervals(provided);
+  return subtractIntervals(required, mergedProvided);
+}
+
+// Required coverage: 9am-5pm
+const required = [
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T22:00:00Z') },
+];
+
+// What we have: two shifts with a gap
+const provided = [
+  { start: new Date('2024-01-15T14:00:00Z'), end: new Date('2024-01-15T17:00:00Z') },
+  { start: new Date('2024-01-15T19:00:00Z'), end: new Date('2024-01-15T22:00:00Z') },
+];
+
+const gaps = findCoverageGaps(provided, required);
+// Result: gap from 12pm - 2pm
+```
+
+### All-Must-Be-Free Scheduling
+
+```typescript
+import { intersectIntervals } from '@courierkit/availability';
+
+function findCommonAvailability(
+  participantsAvailability: Interval[][]
+): Interval[] {
+  if (participantsAvailability.length === 0) return [];
+
+  let common = participantsAvailability[0];
+  for (let i = 1; i < participantsAvailability.length; i++) {
+    common = intersectIntervals(common, participantsAvailability[i]);
+  }
+
+  return common;
+}
+
+const alice = [/* Alice's availability */];
+const bob = [/* Bob's availability */];
+const carol = [/* Carol's availability */];
+
+const teamAvailability = findCommonAvailability([alice, bob, carol]);
+```
+
+### Custom Availability with Exclusions
+
+```typescript
+import { mergeIntervals, subtractIntervals } from '@courierkit/availability';
+
+function computeCustomAvailability(
+  baseAvailability: Interval[],
+  bookings: Interval[],
+  blocks: Interval[],
+  customExclusions: Interval[]
+): Interval[] {
+  // Merge base availability
+  let available = mergeIntervals(baseAvailability);
+
+  // Remove all busy time
+  const allBusy = mergeIntervals([...bookings, ...blocks, ...customExclusions]);
+  available = subtractIntervals(available, allBusy);
+
+  return available;
+}
+```

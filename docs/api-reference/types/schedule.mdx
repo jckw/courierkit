@@ -1,0 +1,182 @@
+---
+title: Schedule Types
+description: Type definitions for schedules, rules, and overrides
+---
+
+# Schedule Types
+
+## Schedule
+
+A named schedule containing recurring rules and optional overrides.
+
+```typescript
+interface Schedule {
+  /** Unique identifier for this schedule */
+  id: string;
+
+  /** Recurring availability rules */
+  rules: ScheduleRule[];
+
+  /** Optional date-specific overrides */
+  overrides?: ScheduleOverride[];
+}
+```
+
+## ScheduleRule
+
+Defines a recurring pattern of availability within a schedule.
+
+```typescript
+interface ScheduleRule {
+  /** Days of the week this rule applies to */
+  days: DayOfWeek[];
+
+  /** Start time in HH:MM format (24-hour, local time) */
+  startTime: LocalTime;
+
+  /** End time in HH:MM format (24-hour, local time) */
+  endTime: LocalTime;
+
+  /** IANA timezone identifier (e.g., "America/New_York") */
+  timezone: string;
+
+  /** Optional date when this rule takes effect (YYYY-MM-DD string or Date) */
+  effectiveFrom?: string | Date;
+
+  /** Optional date when this rule expires (YYYY-MM-DD string or Date) */
+  effectiveUntil?: string | Date;
+}
+```
+
+### Example
+
+```typescript
+const weekdayRule: ScheduleRule = {
+  days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  startTime: '09:00',
+  endTime: '17:00',
+  timezone: 'America/New_York',
+};
+
+const seasonalRule: ScheduleRule = {
+  days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+  startTime: '08:00',
+  endTime: '16:00',
+  timezone: 'America/New_York',
+  effectiveFrom: '2024-06-01',
+  effectiveUntil: '2024-09-01', // Summer hours
+};
+```
+
+## ScheduleOverride
+
+Punches a hole in (or adds to) normal availability for a specific date.
+
+```typescript
+interface ScheduleOverride {
+  /** The specific date this override applies to (YYYY-MM-DD string or Date) */
+  date: string | Date;
+
+  /** true = add availability, false = remove it */
+  available: boolean;
+
+  /** Optional start time; if omitted, applies to the full day */
+  startTime?: LocalTime;
+
+  /** Optional end time; if omitted, applies to the full day */
+  endTime?: LocalTime;
+}
+```
+
+### Examples
+
+```typescript
+// Full day off
+const holiday: ScheduleOverride = {
+  date: '2024-12-25',
+  available: false,
+};
+
+// Morning off only
+const halfDay: ScheduleOverride = {
+  date: '2024-01-15',
+  available: false,
+  startTime: '09:00',
+  endTime: '12:00',
+};
+
+// Add special Saturday hours
+const specialSaturday: ScheduleOverride = {
+  date: '2024-01-20',
+  available: true,
+  startTime: '10:00',
+  endTime: '14:00',
+};
+```
+
+## HostSchedules
+
+Associates a host with their named schedules.
+
+```typescript
+interface HostSchedules {
+  /** The host's unique identifier */
+  hostId: HostId;
+
+  /** Map of schedule key to schedule definition */
+  schedules: Record<string, Schedule>;
+}
+```
+
+### Example
+
+```typescript
+const drSmith: HostSchedules = {
+  hostId: 'dr-smith-123',
+  schedules: {
+    default: {
+      id: 'default',
+      rules: [{
+        days: ['monday', 'tuesday', 'wednesday'],
+        startTime: '09:00',
+        endTime: '17:00',
+        timezone: 'America/New_York',
+      }],
+    },
+    telehealth: {
+      id: 'telehealth',
+      rules: [{
+        days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+        startTime: '07:00',
+        endTime: '20:00',
+        timezone: 'America/New_York',
+      }],
+    },
+  },
+};
+```
+
+## DayOfWeek
+
+Days of the week used in schedule rules.
+
+```typescript
+type DayOfWeek =
+  | 'monday'
+  | 'tuesday'
+  | 'wednesday'
+  | 'thursday'
+  | 'friday'
+  | 'saturday'
+  | 'sunday';
+```
+
+## LocalTime
+
+A local time string in HH:MM format (24-hour).
+
+```typescript
+type LocalTime = string;
+
+// Examples: "09:00", "17:30", "00:00", "23:59"
+```

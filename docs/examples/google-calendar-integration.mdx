@@ -1,0 +1,596 @@
+---
+title: Google Calendar Integration
+description: Integrating external calendar blocks from Google Calendar
+---
+
+# Google Calendar Integration
+
+This example shows how to integrate Google Calendar to block time from external events. The library provides a `buildBlocksFromFreebusy` helper that converts Google's FreeBusy API response into blocks the engine understands.
+
+## Overview
+
+The integration flow:
+
+1. **Setup**: Configure Google Calendar API credentials
+2. **Query**: Fetch busy times using the FreeBusy API
+3. **Convert**: Use `buildBlocksFromFreebusy` to create blocks
+4. **Compute**: Pass blocks to `getAvailableSlots`
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│ Google Calendar │ --> │ FreeBusy API    │ --> │ Availability    │
+│ Events          │     │ Response        │     │ Engine          │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
+
+## Step 1: Google Cloud Setup
+
+First, set up a Google Cloud project with the Calendar API:
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a project or select existing
+3. Enable the **Google Calendar API**
+4. Create credentials:
+   - For server-to-server: Service Account
+   - For user-facing: OAuth 2.0 Client ID
+
+<Tabs>
+  <Tab title="Service Account (Server-to-Server)">
+    ```bash
+    # Download your service account key JSON
+    # Store it securely (not in version control!)
+    export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account.json"
+    ```
+
+    Service accounts need calendar access granted via:
+    - Domain-wide delegation (G Suite), or
+    - Individual calendar sharing
+  </Tab>
+  <Tab title="OAuth 2.0 (User-Facing)">
+    ```bash
+    # Set up environment variables
+    export GOOGLE_CLIENT_ID="your-client-id"
+    export GOOGLE_CLIENT_SECRET="your-client-secret"
+    ```
+
+    Users will need to authorize your app to access their calendar.
+  </Tab>
+</Tabs>
+
+## Step 2: Install Dependencies
+
+```bash
+npm install googleapis @courierkit/availability
+```
+
+## Step 3: Basic FreeBusy Query
+
+Here's how to query Google Calendar's FreeBusy API:
+
+```typescript
+import { google, calendar_v3 } from 'googleapis';
+import { buildBlocksFromFreebusy, type Block, type DateRange } from '@courierkit/availability';
+
+// Initialize the Google Calendar client
+async function getCalendarClient(): Promise<calendar_v3.Calendar> {
+  const auth = new google.auth.GoogleAuth({
+    scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+  });
+
+  return google.calendar({ version: 'v3', auth });
+}
+
+// Fetch busy times for a calendar
+async function fetchBusyTimes(
+  calendarId: string,
+  range: DateRange
+): Promise<calendar_v3.Schema$FreeBusyResponse> {
+  const calendar = await getCalendarClient();
+
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: range.start.toISOString(),
+      timeMax: range.end.toISOString(),
+      items: [{ id: calendarId }],
+    },
+  });
+
+  return response.data;
+}
+
+// Convert to blocks
+async function getCalendarBlocks(
+  calendarId: string,
+  hostId: string,
+  range: DateRange
+): Promise<Block[]> {
+  const freeBusyResponse = await fetchBusyTimes(calendarId, range);
+
+  // Use the helper to convert the response
+  return buildBlocksFromFreebusy(freeBusyResponse, hostId);
+}
+```
+
+## Step 4: Complete Integration Example
+
+Here's a full implementation integrating Google Calendar with the availability engine:
+
+```typescript
+import { google, calendar_v3 } from 'googleapis';
+import {
+  getAvailableSlots,
+  buildBlocksFromFreebusy,
+  type EventType,
+  type HostSchedules,
+  type Booking,
+  type Block,
+  type Slot,
+  type DateRange,
+} from '@courierkit/availability';
+
+// Configuration: Map host IDs to their Google Calendar IDs
+interface HostCalendarConfig {
+  hostId: string;
+  calendarId: string;
+  schedules: HostSchedules;
+}
+
+const hostConfigs: HostCalendarConfig[] = [
+  {
+    hostId: 'dr-smith',
+    calendarId: 'dr.smith@clinic.com',
+    schedules: {
+      hostId: 'dr-smith',
+      schedules: {
+        default: {
+          id: 'default',
+          rules: [{
+            days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+            startTime: '09:00',
+            endTime: '17:00',
+            timezone: 'America/New_York',
+          }],
+        },
+      },
+    },
+  },
+  {
+    hostId: 'dr-jones',
+    calendarId: 'dr.jones@clinic.com',
+    schedules: {
+      hostId: 'dr-jones',
+      schedules: {
+        default: {
+          id: 'default',
+          rules: [{
+            days: ['monday', 'wednesday', 'friday'],
+            startTime: '08:00',
+            endTime: '16:00',
+            timezone: 'America/New_York',
+          }],
+        },
+      },
+    },
+  },
+];
+
+class CalendarIntegratedAvailability {
+  private calendar: calendar_v3.Calendar | null = null;
+
+  async initialize() {
+    const auth = new google.auth.GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+    });
+    this.calendar = google.calendar({ version: 'v3', auth });
+  }
+
+  // Fetch blocks from Google Calendar for all hosts
+  private async fetchAllCalendarBlocks(
+    configs: HostCalendarConfig[],
+    range: DateRange
+  ): Promise<Block[]> {
+    if (!this.calendar) {
+      throw new Error('Calendar client not initialized');
+    }
+
+    // Build the freebusy query for all calendars at once
+    const response = await this.calendar.freebusy.query({
+      requestBody: {
+        timeMin: range.start.toISOString(),
+        timeMax: range.end.toISOString(),
+        items: configs.map(c => ({ id: c.calendarId })),
+      },
+    });
+
+    // Convert each calendar's busy times to blocks
+    const allBlocks: Block[] = [];
+
+    for (const config of configs) {
+      const calendarBusy = response.data.calendars?.[config.calendarId];
+      if (calendarBusy?.busy) {
+        for (const busyPeriod of calendarBusy.busy) {
+          allBlocks.push({
+            hostId: config.hostId,
+            start: new Date(busyPeriod.start!),
+            end: new Date(busyPeriod.end!),
+          });
+        }
+      }
+    }
+
+    return allBlocks;
+  }
+
+  // Main method: Get available slots with calendar integration
+  async getAvailability(
+    eventType: EventType,
+    bookings: Booking[],
+    range: DateRange
+  ): Promise<Slot[]> {
+    // Fetch external calendar blocks
+    const calendarBlocks = await this.fetchAllCalendarBlocks(hostConfigs, range);
+
+    console.log(`Fetched ${calendarBlocks.length} external calendar blocks`);
+
+    // Get availability
+    return getAvailableSlots({
+      eventType,
+      hosts: hostConfigs.map(c => c.schedules),
+      bookings,
+      blocks: calendarBlocks,
+      range,
+    });
+  }
+}
+
+// Usage
+async function main() {
+  const service = new CalendarIntegratedAvailability();
+  await service.initialize();
+
+  const consultation: EventType = {
+    id: 'consultation',
+    length: 60 * 60 * 1000,
+    bufferAfter: 15 * 60 * 1000,
+    minimumNotice: 24 * 60 * 60 * 1000,
+  };
+
+  const existingBookings: Booking[] = [
+    // From your database
+  ];
+
+  const slots = await service.getAvailability(
+    consultation,
+    existingBookings,
+    {
+      start: new Date('2024-01-15T00:00:00Z'),
+      end: new Date('2024-01-22T00:00:00Z'),
+    }
+  );
+
+  console.log(`Found ${slots.length} available slots`);
+}
+```
+
+## Step 5: Handling Multiple Calendars per Host
+
+A host might have multiple calendars (work, personal, shared):
+
+```typescript
+interface HostCalendarMapping {
+  hostId: string;
+  calendars: string[]; // Multiple calendar IDs
+}
+
+async function fetchMultiCalendarBlocks(
+  mapping: HostCalendarMapping,
+  range: DateRange
+): Promise<Block[]> {
+  const response = await calendar.freebusy.query({
+    requestBody: {
+      timeMin: range.start.toISOString(),
+      timeMax: range.end.toISOString(),
+      items: mapping.calendars.map(id => ({ id })),
+    },
+  });
+
+  const blocks: Block[] = [];
+
+  // Aggregate busy times from all calendars
+  for (const calendarId of mapping.calendars) {
+    const calendarBusy = response.data.calendars?.[calendarId];
+    if (calendarBusy?.busy) {
+      for (const busyPeriod of calendarBusy.busy) {
+        blocks.push({
+          hostId: mapping.hostId,
+          start: new Date(busyPeriod.start!),
+          end: new Date(busyPeriod.end!),
+        });
+      }
+    }
+  }
+
+  return blocks;
+}
+
+// Usage: Dr. Smith has work and personal calendars
+const drSmithMapping: HostCalendarMapping = {
+  hostId: 'dr-smith',
+  calendars: [
+    'dr.smith@clinic.com',        // Work calendar
+    'personal@gmail.com',          // Personal calendar
+    'clinic-shared@group.calendar.google.com', // Shared clinic calendar
+  ],
+};
+```
+
+## Step 6: Caching for Performance
+
+FreeBusy API calls can be slow. Implement caching for better performance:
+
+```typescript
+interface CacheEntry {
+  blocks: Block[];
+  fetchedAt: Date;
+}
+
+class CachedCalendarService {
+  private cache = new Map<string, CacheEntry>();
+  private cacheTTL = 5 * 60 * 1000; // 5 minutes
+
+  private getCacheKey(hostId: string, range: DateRange): string {
+    return `${hostId}:${range.start.toISOString()}:${range.end.toISOString()}`;
+  }
+
+  async getBlocks(
+    hostId: string,
+    calendarId: string,
+    range: DateRange
+  ): Promise<Block[]> {
+    const cacheKey = this.getCacheKey(hostId, range);
+    const cached = this.cache.get(cacheKey);
+
+    // Return cached if fresh
+    if (cached && Date.now() - cached.fetchedAt.getTime() < this.cacheTTL) {
+      return cached.blocks;
+    }
+
+    // Fetch fresh data
+    const blocks = await this.fetchFromGoogle(calendarId, hostId, range);
+
+    // Cache it
+    this.cache.set(cacheKey, {
+      blocks,
+      fetchedAt: new Date(),
+    });
+
+    return blocks;
+  }
+
+  private async fetchFromGoogle(
+    calendarId: string,
+    hostId: string,
+    range: DateRange
+  ): Promise<Block[]> {
+    const response = await this.calendar.freebusy.query({
+      requestBody: {
+        timeMin: range.start.toISOString(),
+        timeMax: range.end.toISOString(),
+        items: [{ id: calendarId }],
+      },
+    });
+
+    return buildBlocksFromFreebusy(response.data, hostId);
+  }
+
+  // Clear cache when a booking is made (calendar state changed)
+  invalidateCache(hostId?: string) {
+    if (hostId) {
+      for (const key of this.cache.keys()) {
+        if (key.startsWith(hostId)) {
+          this.cache.delete(key);
+        }
+      }
+    } else {
+      this.cache.clear();
+    }
+  }
+}
+```
+
+## Step 7: Error Handling
+
+Handle common Google Calendar API errors gracefully:
+
+```typescript
+import { GaxiosError } from 'gaxios';
+
+async function fetchBusyTimesWithRetry(
+  calendarId: string,
+  hostId: string,
+  range: DateRange,
+  maxRetries = 3
+): Promise<Block[]> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: range.start.toISOString(),
+          timeMax: range.end.toISOString(),
+          items: [{ id: calendarId }],
+        },
+      });
+
+      // Check for calendar-level errors
+      const calendarData = response.data.calendars?.[calendarId];
+      if (calendarData?.errors) {
+        console.warn(`Calendar errors for ${calendarId}:`, calendarData.errors);
+        // Return empty blocks if calendar has errors (e.g., no access)
+        return [];
+      }
+
+      return buildBlocksFromFreebusy(response.data, hostId);
+
+    } catch (error) {
+      if (error instanceof GaxiosError) {
+        const status = error.response?.status;
+
+        // Handle specific error codes
+        if (status === 403) {
+          console.warn(`No access to calendar ${calendarId}, skipping`);
+          return []; // Skip this calendar
+        }
+
+        if (status === 404) {
+          console.warn(`Calendar ${calendarId} not found, skipping`);
+          return [];
+        }
+
+        if (status === 429) {
+          // Rate limited - exponential backoff
+          const delay = Math.pow(2, attempt) * 1000;
+          console.warn(`Rate limited, retrying in ${delay}ms`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+
+        if (status && status >= 500) {
+          // Server error - retry
+          console.warn(`Server error (${status}), attempt ${attempt}/${maxRetries}`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
+      }
+
+      // Unknown error on last attempt
+      if (attempt === maxRetries) {
+        console.error(`Failed to fetch calendar ${calendarId}:`, error);
+        return []; // Fail gracefully
+      }
+    }
+  }
+
+  return [];
+}
+```
+
+## Complete Example: Express API Endpoint
+
+```typescript
+import express from 'express';
+import { google } from 'googleapis';
+import {
+  getAvailableSlots,
+  buildBlocksFromFreebusy,
+  type EventType,
+  type Block,
+} from '@courierkit/availability';
+
+const app = express();
+
+// Initialize Google Auth
+const auth = new google.auth.GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
+});
+const calendar = google.calendar({ version: 'v3', auth });
+
+// Host configuration
+const hosts = [
+  {
+    hostId: 'dr-smith',
+    calendarId: 'dr.smith@clinic.com',
+    schedules: {
+      hostId: 'dr-smith',
+      schedules: {
+        default: {
+          id: 'default',
+          rules: [{
+            days: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'],
+            startTime: '09:00',
+            endTime: '17:00',
+            timezone: 'America/New_York',
+          }],
+        },
+      },
+    },
+  },
+];
+
+const eventTypes: Record<string, EventType> = {
+  consultation: {
+    id: 'consultation',
+    length: 60 * 60 * 1000,
+    bufferAfter: 15 * 60 * 1000,
+    minimumNotice: 24 * 60 * 60 * 1000,
+  },
+};
+
+app.get('/api/availability', async (req, res) => {
+  try {
+    const { eventType: eventTypeId, startDate, endDate } = req.query;
+
+    const eventType = eventTypes[eventTypeId as string];
+    if (!eventType) {
+      return res.status(400).json({ error: 'Invalid event type' });
+    }
+
+    const range = {
+      start: new Date(startDate as string),
+      end: new Date(endDate as string),
+    };
+
+    // Fetch calendar blocks for all hosts in parallel
+    const blockPromises = hosts.map(async host => {
+      const response = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: range.start.toISOString(),
+          timeMax: range.end.toISOString(),
+          items: [{ id: host.calendarId }],
+        },
+      });
+      return buildBlocksFromFreebusy(response.data, host.hostId);
+    });
+
+    const blockArrays = await Promise.all(blockPromises);
+    const allBlocks = blockArrays.flat();
+
+    // Fetch bookings from database (your implementation)
+    const bookings = await fetchBookingsFromDatabase(range);
+
+    // Compute availability
+    const slots = getAvailableSlots({
+      eventType,
+      hosts: hosts.map(h => h.schedules),
+      bookings,
+      blocks: allBlocks,
+      range,
+    });
+
+    res.json({
+      slots: slots.map(slot => ({
+        hostId: slot.hostId,
+        start: slot.start.toISOString(),
+        end: slot.end.toISOString(),
+      })),
+    });
+  } catch (error) {
+    console.error('Availability error:', error);
+    res.status(500).json({ error: 'Failed to fetch availability' });
+  }
+});
+
+app.listen(3000, () => {
+  console.log('Server running on port 3000');
+});
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Outlook Integration" icon="microsoft">
+    Similar patterns work with Microsoft Graph API for Outlook calendars.
+  </Card>
+  <Card title="Webhook Sync" icon="webhook">
+    Use Google Calendar push notifications to invalidate cache when calendars change.
+  </Card>
+</CardGroup>

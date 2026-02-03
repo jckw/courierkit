@@ -1,0 +1,152 @@
+---
+title: Slot & Query Types
+description: Type definitions for slots and query inputs
+---
+
+# Slot
+
+A bookable time slot returned by the engine.
+
+```typescript
+interface Slot {
+  /** The host this slot belongs to */
+  hostId: HostId;
+
+  /** Start time of the slot (inclusive) */
+  start: DateTime;
+
+  /** End time of the slot (exclusive); equals start + eventType.length */
+  end: DateTime;
+
+  /** The actual buffer window before the slot (informational) */
+  bufferBefore?: Interval;
+
+  /** The actual buffer window after the slot (informational) */
+  bufferAfter?: Interval;
+}
+```
+
+## Example
+
+```typescript
+const slot: Slot = {
+  hostId: 'dr-smith-123',
+  start: new Date('2024-01-15T14:00:00Z'),
+  end: new Date('2024-01-15T15:00:00Z'),
+  bufferBefore: {
+    start: new Date('2024-01-15T13:45:00Z'),
+    end: new Date('2024-01-15T14:00:00Z'),
+  },
+  bufferAfter: {
+    start: new Date('2024-01-15T15:00:00Z'),
+    end: new Date('2024-01-15T15:15:00Z'),
+  },
+};
+```
+
+## Buffer Information
+
+The `bufferBefore` and `bufferAfter` fields are informational—they show what time is reserved around the slot. This is useful for:
+
+- Displaying "blocked for prep" indicators in a calendar UI
+- Understanding why adjacent slots aren't available
+- Debugging schedule issues
+
+---
+
+# DateRange
+
+A date range for querying availability.
+
+```typescript
+interface DateRange {
+  /** Start of the range (inclusive) */
+  start: Date;
+
+  /** End of the range (exclusive) */
+  end: Date;
+}
+```
+
+## Example
+
+```typescript
+const nextWeek: DateRange = {
+  start: new Date('2024-01-15T00:00:00Z'),
+  end: new Date('2024-01-22T00:00:00Z'),
+};
+```
+
+---
+
+# Interval
+
+The universal primitive for time ranges.
+
+```typescript
+interface Interval {
+  /** The start of the interval (inclusive) */
+  start: Date;
+
+  /** The end of the interval (exclusive) */
+  end: Date;
+}
+```
+
+All intervals are half-open: `[start, end)`.
+
+---
+
+# GetAvailableSlotsInput
+
+Input for the primary `getAvailableSlots` query.
+
+```typescript
+interface GetAvailableSlotsInput {
+  /** The event type being booked */
+  eventType: EventType;
+
+  /** One or more hosts to check availability for */
+  hosts: HostSchedules[];
+
+  /** Existing bookings across all hosts */
+  bookings: Booking[];
+
+  /** Optional external calendar blocks */
+  blocks?: Block[];
+
+  /** The date range to query for available slots */
+  range: DateRange;
+
+  /**
+   * Optional map of event type IDs to their buffer configurations.
+   * Used to look up buffer durations for existing bookings.
+   */
+  eventTypes?: Record<string, EventTypeBufferConfig>;
+}
+```
+
+## Example
+
+```typescript
+const input: GetAvailableSlotsInput = {
+  eventType: {
+    id: 'consultation',
+    length: 60 * 60 * 1000,
+    bufferAfter: 15 * 60 * 1000,
+  },
+  hosts: [drSmithSchedules, drJonesSchedules],
+  bookings: existingBookings,
+  blocks: googleCalendarBlocks,
+  range: {
+    start: new Date('2024-01-15T00:00:00Z'),
+    end: new Date('2024-01-22T00:00:00Z'),
+  },
+  eventTypes: {
+    'consultation': { bufferAfter: 15 * 60 * 1000 },
+    'follow-up': { bufferAfter: 5 * 60 * 1000 },
+  },
+};
+
+const slots = getAvailableSlots(input);
+```
