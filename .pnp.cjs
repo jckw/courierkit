@@ -11,14 +11,19 @@ const RAW_RUNTIME_STATE =
   ],\
   "dependencyTreeRoots": [\
     {\
-      "name": "slot-engine",\
+      "name": "courierkit",\
       "reference": "workspace:."\
+    },\
+    {\
+      "name": "@courierkit/availability",\
+      "reference": "workspace:packages/availability"\
     }\
   ],\
   "enableTopLevelFallback": true,\
   "ignorePatternData": "(^(?:\\\\.yarn\\\\/sdks(?:\\\\/(?!\\\\.{1,2}(?:\\\\/|$))(?:(?:(?!(?:^|\\\\/)\\\\.{1,2}(?:\\\\/|$)).)*?)|$))$)",\
   "fallbackExclusionList": [\
-    ["slot-engine", ["workspace:."]]\
+    ["@courierkit/availability", ["workspace:packages/availability"]],\
+    ["courierkit", ["workspace:."]]\
   ],\
   "fallbackPool": [\
   ],\
@@ -30,8 +35,6 @@ const RAW_RUNTIME_STATE =
           ["@biomejs/biome", "npm:2.3.14"],\
           ["@types/node", "npm:25.2.0"],\
           ["bun-types", "npm:1.3.8"],\
-          ["date-fns", "npm:4.1.0"],\
-          ["date-fns-tz", "virtual:68407d7eb6073a8b65cd333d9cfee316d0f7d8b1b41b7625282ae7fcf4097b66fc054bfc546af703303d9b157ebd20ed059e4ae280365647e3ab660fd3824968#npm:3.2.0"],\
           ["typescript", "patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"]\
         ],\
         "linkType": "SOFT"\
@@ -126,6 +129,18 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["@courierkit/availability", [\
+      ["workspace:packages/availability", {\
+        "packageLocation": "./packages/availability/",\
+        "packageDependencies": [\
+          ["@courierkit/availability", "workspace:packages/availability"],\
+          ["bun-types", "npm:1.3.8"],\
+          ["date-fns", "npm:4.1.0"],\
+          ["date-fns-tz", "virtual:0791b7d63c76abff2ae74e62942f57bad39e72de7c34090b97258146f10d3f848f5bee6321c341c835cdbb3c6f8d009758611b55d8bedeb87db438ad191d8428#npm:3.2.0"]\
+        ],\
+        "linkType": "SOFT"\
+      }]\
+    ]],\
     ["@types/node", [\
       ["npm:25.2.0", {\
         "packageLocation": "../../.yarn/berry/cache/@types-node-npm-25.2.0-b623340683-10c0.zip/node_modules/@types/node/",\
@@ -146,6 +161,19 @@ const RAW_RUNTIME_STATE =
         "linkType": "HARD"\
       }]\
     ]],\
+    ["courierkit", [\
+      ["workspace:.", {\
+        "packageLocation": "./",\
+        "packageDependencies": [\
+          ["courierkit", "workspace:."],\
+          ["@biomejs/biome", "npm:2.3.14"],\
+          ["@types/node", "npm:25.2.0"],\
+          ["bun-types", "npm:1.3.8"],\
+          ["typescript", "patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"]\
+        ],\
+        "linkType": "SOFT"\
+      }]\
+    ]],\
     ["date-fns", [\
       ["npm:4.1.0", {\
         "packageLocation": "../../.yarn/berry/cache/date-fns-npm-4.1.0-764604ee0f-10c0.zip/node_modules/date-fns/",\
@@ -163,10 +191,10 @@ const RAW_RUNTIME_STATE =
         ],\
         "linkType": "SOFT"\
       }],\
-      ["virtual:68407d7eb6073a8b65cd333d9cfee316d0f7d8b1b41b7625282ae7fcf4097b66fc054bfc546af703303d9b157ebd20ed059e4ae280365647e3ab660fd3824968#npm:3.2.0", {\
-        "packageLocation": "./.yarn/__virtual__/date-fns-tz-virtual-5cf2db29df/3/.yarn/berry/cache/date-fns-tz-npm-3.2.0-fe150c9e17-10c0.zip/node_modules/date-fns-tz/",\
+      ["virtual:0791b7d63c76abff2ae74e62942f57bad39e72de7c34090b97258146f10d3f848f5bee6321c341c835cdbb3c6f8d009758611b55d8bedeb87db438ad191d8428#npm:3.2.0", {\
+        "packageLocation": "./.yarn/__virtual__/date-fns-tz-virtual-22e1a6006a/3/.yarn/berry/cache/date-fns-tz-npm-3.2.0-fe150c9e17-10c0.zip/node_modules/date-fns-tz/",\
         "packageDependencies": [\
-          ["date-fns-tz", "virtual:68407d7eb6073a8b65cd333d9cfee316d0f7d8b1b41b7625282ae7fcf4097b66fc054bfc546af703303d9b157ebd20ed059e4ae280365647e3ab660fd3824968#npm:3.2.0"],\
+          ["date-fns-tz", "virtual:0791b7d63c76abff2ae74e62942f57bad39e72de7c34090b97258146f10d3f848f5bee6321c341c835cdbb3c6f8d009758611b55d8bedeb87db438ad191d8428#npm:3.2.0"],\
           ["@types/date-fns", null],\
           ["date-fns", "npm:4.1.0"]\
         ],\
@@ -175,21 +203,6 @@ const RAW_RUNTIME_STATE =
           "date-fns"\
         ],\
         "linkType": "HARD"\
-      }]\
-    ]],\
-    ["slot-engine", [\
-      ["workspace:.", {\
-        "packageLocation": "./",\
-        "packageDependencies": [\
-          ["slot-engine", "workspace:."],\
-          ["@biomejs/biome", "npm:2.3.14"],\
-          ["@types/node", "npm:25.2.0"],\
-          ["bun-types", "npm:1.3.8"],\
-          ["date-fns", "npm:4.1.0"],\
-          ["date-fns-tz", "virtual:68407d7eb6073a8b65cd333d9cfee316d0f7d8b1b41b7625282ae7fcf4097b66fc054bfc546af703303d9b157ebd20ed059e4ae280365647e3ab660fd3824968#npm:3.2.0"],\
-          ["typescript", "patch:typescript@npm%3A5.9.3#optional!builtin<compat/typescript>::version=5.9.3&hash=5786d5"]\
-        ],\
-        "linkType": "SOFT"\
       }]\
     ]],\
     ["typescript", [\

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { getAvailableSlots } from '../src/slots.js';
-import { expandSchedule } from '../src/schedule.js';
 import { mergeIntervals, subtractIntervals } from '../src/intervals.js';
+import { expandSchedule } from '../src/schedule.js';
+import { getAvailableSlots } from '../src/slots.js';
 import type {
 	Booking,
 	EventType,
@@ -28,7 +28,7 @@ function generateBookings(
 	hostId: string,
 	eventTypeId: string,
 	startDate: Date,
-	count: number
+	count: number,
 ): Booking[] {
 	const bookings: Booking[] = [];
 	let current = new Date(startDate);
@@ -104,10 +104,12 @@ describe('Benchmark Tests', () => {
 				expandSchedule(schedule, {
 					start: d('2024-01-01T00:00:00Z'),
 					end: d('2024-01-08T00:00:00Z'),
-				})
+				}),
 			);
 
-			console.log(`Schedule expansion (1 week): ${durationMs.toFixed(2)}ms, ${result.length} intervals`);
+			console.log(
+				`Schedule expansion (1 week): ${durationMs.toFixed(2)}ms, ${result.length} intervals`,
+			);
 			expect(result.length).toBe(5); // 5 weekdays
 			expect(durationMs).toBeLessThan(100); // Should be fast
 		});
@@ -129,10 +131,12 @@ describe('Benchmark Tests', () => {
 				expandSchedule(schedule, {
 					start: d('2024-01-01T00:00:00Z'),
 					end: d('2024-02-01T00:00:00Z'),
-				})
+				}),
 			);
 
-			console.log(`Schedule expansion (1 month): ${durationMs.toFixed(2)}ms, ${result.length} intervals`);
+			console.log(
+				`Schedule expansion (1 month): ${durationMs.toFixed(2)}ms, ${result.length} intervals`,
+			);
 			expect(result.length).toBeGreaterThan(20);
 			expect(durationMs).toBeLessThan(200);
 		});
@@ -154,10 +158,12 @@ describe('Benchmark Tests', () => {
 				expandSchedule(schedule, {
 					start: d('2024-01-01T00:00:00Z'),
 					end: d('2025-01-01T00:00:00Z'),
-				})
+				}),
 			);
 
-			console.log(`Schedule expansion (1 year): ${durationMs.toFixed(2)}ms, ${result.length} intervals`);
+			console.log(
+				`Schedule expansion (1 year): ${durationMs.toFixed(2)}ms, ${result.length} intervals`,
+			);
 			expect(result.length).toBeGreaterThan(250);
 			expect(durationMs).toBeLessThan(5000);
 		});
@@ -165,14 +171,16 @@ describe('Benchmark Tests', () => {
 
 	describe('Interval Operations', () => {
 		test('merges 1000 random intervals', () => {
-			const intervals = Array.from({ length: 1000 }, (_, i) => ({
+			const intervals = Array.from({ length: 1000 }, (_, _i) => ({
 				start: new Date(now.getTime() + Math.random() * days(30)),
 				end: new Date(now.getTime() + Math.random() * days(30) + hours(1)),
 			}));
 
 			const { result, durationMs } = measure(() => mergeIntervals(intervals));
 
-			console.log(`Merge 1000 intervals: ${durationMs.toFixed(2)}ms, ${result.length} merged intervals`);
+			console.log(
+				`Merge 1000 intervals: ${durationMs.toFixed(2)}ms, ${result.length} merged intervals`,
+			);
 			expect(durationMs).toBeLessThan(50);
 		});
 
@@ -189,7 +197,9 @@ describe('Benchmark Tests', () => {
 
 			const { result, durationMs } = measure(() => subtractIntervals(from, subtract));
 
-			console.log(`Subtract 500 from 500: ${durationMs.toFixed(2)}ms, ${result.length} result intervals`);
+			console.log(
+				`Subtract 500 from 500: ${durationMs.toFixed(2)}ms, ${result.length} result intervals`,
+			);
 			expect(durationMs).toBeLessThan(500);
 		});
 	});
@@ -240,7 +250,9 @@ describe('Benchmark Tests', () => {
 
 			const { result, durationMs } = measure(() => getAvailableSlots(input, now));
 
-			console.log(`1 host, 50 bookings, 1 month: ${durationMs.toFixed(2)}ms, ${result.length} slots`);
+			console.log(
+				`1 host, 50 bookings, 1 month: ${durationMs.toFixed(2)}ms, ${result.length} slots`,
+			);
 			expect(durationMs).toBeLessThan(200);
 		});
 
@@ -264,7 +276,9 @@ describe('Benchmark Tests', () => {
 
 			const { result, durationMs } = measure(() => getAvailableSlots(input, now));
 
-			console.log(`10 hosts, 0 bookings, 1 week: ${durationMs.toFixed(2)}ms, ${result.length} slots`);
+			console.log(
+				`10 hosts, 0 bookings, 1 week: ${durationMs.toFixed(2)}ms, ${result.length} slots`,
+			);
 			expect(result.length).toBe(800); // 10 hosts * 80 slots
 			expect(durationMs).toBeLessThan(500);
 		});
@@ -280,7 +294,7 @@ describe('Benchmark Tests', () => {
 
 			const hosts = Array.from({ length: 10 }, (_, i) => createHostSchedule(`host-${i}`));
 			const bookings = hosts.flatMap((host) =>
-				generateBookings(host.hostId, 'consultation', now, 20)
+				generateBookings(host.hostId, 'consultation', now, 20),
 			);
 
 			const input: GetAvailableSlotsInput = {
@@ -295,7 +309,9 @@ describe('Benchmark Tests', () => {
 
 			const { result, durationMs } = measure(() => getAvailableSlots(input, now));
 
-			console.log(`10 hosts, 200 bookings, 1 month: ${durationMs.toFixed(2)}ms, ${result.length} slots`);
+			console.log(
+				`10 hosts, 200 bookings, 1 month: ${durationMs.toFixed(2)}ms, ${result.length} slots`,
+			);
 			expect(durationMs).toBeLessThan(10000);
 		});
 
@@ -309,7 +325,7 @@ describe('Benchmark Tests', () => {
 
 			const hosts = Array.from({ length: 50 }, (_, i) => createHostSchedule(`host-${i}`));
 			const bookings = hosts.flatMap((host) =>
-				generateBookings(host.hostId, 'consultation', now, 10)
+				generateBookings(host.hostId, 'consultation', now, 10),
 			);
 
 			const input: GetAvailableSlotsInput = {
@@ -324,7 +340,9 @@ describe('Benchmark Tests', () => {
 
 			const { result, durationMs } = measure(() => getAvailableSlots(input, now));
 
-			console.log(`50 hosts, 500 bookings, 2 weeks: ${durationMs.toFixed(2)}ms, ${result.length} slots`);
+			console.log(
+				`50 hosts, 500 bookings, 2 weeks: ${durationMs.toFixed(2)}ms, ${result.length} slots`,
+			);
 			expect(durationMs).toBeLessThan(5000);
 		});
 	});
@@ -353,10 +371,12 @@ describe('Benchmark Tests', () => {
 				expandSchedule(schedule, {
 					start: now,
 					end: new Date(now.getTime() + days(60)),
-				})
+				}),
 			);
 
-			console.log(`Schedule with 50 overrides: ${durationMs.toFixed(2)}ms, ${result.length} intervals`);
+			console.log(
+				`Schedule with 50 overrides: ${durationMs.toFixed(2)}ms, ${result.length} intervals`,
+			);
 			expect(durationMs).toBeLessThan(5000);
 		});
 
@@ -377,7 +397,7 @@ describe('Benchmark Tests', () => {
 
 			const hosts = Array.from({ length: 5 }, (_, i) => createHostSchedule(`host-${i}`));
 			const bookings = hosts.flatMap((host) =>
-				generateBookings(host.hostId, 'consultation', now, 15)
+				generateBookings(host.hostId, 'consultation', now, 15),
 			);
 
 			const input: GetAvailableSlotsInput = {
@@ -427,7 +447,9 @@ describe('Benchmark Tests', () => {
 			const totalMs = performance.now() - start;
 			const slotsPerSecond = (totalSlots / totalMs) * 1000;
 
-			console.log(`Throughput: ${slotsPerSecond.toFixed(0)} slots/second over ${iterations} iterations`);
+			console.log(
+				`Throughput: ${slotsPerSecond.toFixed(0)} slots/second over ${iterations} iterations`,
+			);
 			console.log(`Average: ${(totalMs / iterations).toFixed(2)}ms per query`);
 
 			expect(slotsPerSecond).toBeGreaterThan(1000);

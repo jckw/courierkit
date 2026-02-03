@@ -1,32 +1,21 @@
 {
-  "name": "@courierkit/availability",
-  "version": "0.1.0",
-  "description": "A stateless, composable slot generation library for Node.js",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
+  "name": "courierkit",
+  "private": true,
   "packageManager": "yarn@4.6.0",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "build": "tsc",
-    "test": "bun test",
+    "build": "yarn workspaces foreach -Apt run build",
+    "test": "yarn workspaces foreach -Ap run test",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "yarn workspaces foreach -Ap run typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.13",
     "@types/node": "^25.2.0",
     "bun-types": "^1.3.8",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "date-fns": "^4.1.0",
-    "date-fns-tz": "^3.2.0"
   }
 }

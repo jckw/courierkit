@@ -9,7 +9,6 @@ import type {
 	Booking,
 	Duration,
 	EventType,
-	EventTypeBufferConfig,
 	GetAvailableSlotsInput,
 	HostId,
 	Interval,
