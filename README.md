@@ -215,7 +215,7 @@ Finds time present in both sets.
 
 ## Documentation
 
-Full documentation with examples: [docs.courierkit.com/availability](https://docs.courierkit.com/availability)
+Full documentation with examples: [courierkit-availability.mintlify.app](https://courierkit-availability.mintlify.app)
 
 ## License
 

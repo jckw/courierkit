@@ -18,7 +18,7 @@
   "topbarLinks": [
     {
       "name": "GitHub",
-      "url": "https://github.com/courierkit/availability"
+      "url": "https://github.com/jckw/courierkit-availability"
     }
   ],
   "topbarCtaButton": {
@@ -35,12 +35,7 @@
     {
       "name": "GitHub",
       "icon": "github",
-      "url": "https://github.com/courierkit/availability"
-    },
-    {
-      "name": "NPM",
-      "icon": "npm",
-      "url": "https://www.npmjs.com/package/@courierkit/availability"
+      "url": "https://github.com/jckw/courierkit-availability"
     }
   ],
   "navigation": [
@@ -86,6 +81,6 @@
     }
   ],
   "footerSocials": {
-    "github": "https://github.com/courierkit/availability"
+    "github": "https://github.com/jckw/courierkit-availability"
   }
 }
